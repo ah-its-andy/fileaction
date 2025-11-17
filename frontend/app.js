@@ -272,52 +272,67 @@ function renderTaskList() {
 function renderTaskCard(task) {
     const fileName = task.input_path.split('/').pop();
     const startTime = task.started_at ? formatDate(task.started_at) : '-';
-    const endTime = task.completed_at ? formatDate(task.completed_at) : '-';
+    
+    // Calculate duration
+    let duration = '-';
+    if (task.started_at) {
+        const start = new Date(task.started_at);
+        const end = task.completed_at ? new Date(task.completed_at) : new Date();
+        const durationMs = end - start;
+        const seconds = Math.floor(durationMs / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        
+        if (hours > 0) {
+            duration = `${hours}h ${minutes % 60}m`;
+        } else if (minutes > 0) {
+            duration = `${minutes}m ${seconds % 60}s`;
+        } else {
+            duration = `${seconds}s`;
+        }
+    }
     
     return `
         <div class="task-card">
             <div class="task-header">
-                <div class="task-title">${escapeHtml(fileName)}</div>
                 <span class="task-status ${task.status}">${task.status}</span>
+                <div class="task-title" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
+                <div class="task-actions">
+                    <button class="btn btn-secondary btn-small" onclick="viewTaskLog('${task.id}', '${task.status}')">
+                        View Log
+                    </button>
+                    ${task.status === 'failed' || task.status === 'cancelled' ? `
+                    <button class="btn btn-success btn-small" onclick="retryTask('${task.id}')">
+                        Retry
+                    </button>
+                    ` : ''}
+                    ${task.status === 'running' ? `
+                    <button class="btn btn-danger btn-small" onclick="cancelTask('${task.id}')">
+                        Cancel
+                    </button>
+                    ` : ''}
+                </div>
             </div>
             <div class="task-info">
-                <div class="task-info-row">
-                    <strong>Input:</strong>
-                    <span title="${escapeHtml(task.input_path)}">${escapeHtml(task.input_path)}</span>
-                </div>
-                <div class="task-info-row">
-                    <strong>Output:</strong>
-                    <span title="${escapeHtml(task.output_path)}">${escapeHtml(task.output_path)}</span>
-                </div>
-                <div class="task-info-row">
-                    <strong>Started:</strong>
-                    <span>${startTime}</span>
-                </div>
-                <div class="task-info-row">
-                    <strong>Completed:</strong>
-                    <span>${endTime}</span>
-                </div>
                 ${task.error_message ? `
-                <div class="task-info-row full-width" style="color: var(--accent-red);">
+                <div class="task-info-item error">
                     <strong>Error:</strong>
                     <span title="${escapeHtml(task.error_message)}">${escapeHtml(task.error_message)}</span>
                 </div>
-                ` : ''}
-            </div>
-            <div class="task-actions">
-                <button class="btn btn-secondary btn-small" onclick="viewTaskLog('${task.id}', '${task.status}')">
-                    View Log
-                </button>
-                ${task.status === 'failed' || task.status === 'cancelled' ? `
-                <button class="btn btn-success btn-small" onclick="retryTask('${task.id}')">
-                    Retry
-                </button>
-                ` : ''}
-                ${task.status === 'running' ? `
-                <button class="btn btn-danger btn-small" onclick="cancelTask('${task.id}')">
-                    Cancel
-                </button>
-                ` : ''}
+                ` : `
+                <div class="task-info-item file-path">
+                    <strong>Path:</strong>
+                    <span title="${escapeHtml(task.input_path)}">${escapeHtml(task.input_path)}</span>
+                </div>
+                <div class="task-info-item">
+                    <strong>Started:</strong>
+                    <span>${startTime}</span>
+                </div>
+                <div class="task-info-item">
+                    <strong>Duration:</strong>
+                    <span>${duration}</span>
+                </div>
+                `}
             </div>
         </div>
     `;
