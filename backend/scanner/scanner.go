@@ -138,6 +138,13 @@ func (s *Scanner) scanPath(workflowID, scanPath string, workflowDef *workflow.Wo
 func (s *Scanner) scanFile(workflowID, filePath string, workflowDef *workflow.WorkflowDef, result *ScanResult) error {
 	result.FilesScanned++
 
+	// Double-check if file matches glob pattern before processing
+	if !workflow.MatchesFileGlob(filePath, workflowDef.Options.FileGlob) {
+		log.Printf("File %s does not match glob pattern %s, skipping", filePath, workflowDef.Options.FileGlob)
+		result.FilesSkipped++
+		return nil
+	}
+
 	// Calculate MD5
 	md5Hash, fileSize, err := calculateMD5(filePath)
 	if err != nil {

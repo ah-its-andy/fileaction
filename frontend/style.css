@@ -216,6 +216,51 @@ body {
     padding: 24px 32px;
 }
 
+/* Task Status Tabs */
+.task-status-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0;
+}
+
+.tab-button {
+    background: none;
+    border: none;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tab-button:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
+}
+
+.tab-button.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+
+.tab-icon {
+    font-size: 16px;
+}
+
+.task-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
 /* Task List */
 .task-list {
     display: flex;

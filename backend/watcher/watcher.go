@@ -262,6 +262,12 @@ func (w *Watcher) processFile(wf *models.Workflow, filePath string) {
 		return
 	}
 
+	// Check if file matches glob pattern
+	if !workflow.MatchesFileGlob(filePath, workflowDef.Options.FileGlob) {
+		log.Printf("File %s does not match glob pattern %s, skipping", filePath, workflowDef.Options.FileGlob)
+		return
+	}
+
 	// Use scanner to process the file (need to export scanFile method)
 	// For now, we'll create a temporary implementation
 	fileRepo := database.NewFileRepo(w.db)

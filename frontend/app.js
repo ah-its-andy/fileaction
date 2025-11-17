@@ -11,6 +11,7 @@ const state = {
     tasksTotal: 0,
     tasksPage: 1,
     tasksPageSize: 20,
+    tasksStatus: 'all', // 'all', 'running', 'pending', 'completed', 'failed'
     tasksAutoRefresh: null,
     logAutoRefresh: null,
     currentTaskId: null,
@@ -140,30 +141,116 @@ function renderWorkflowHeader(workflow) {
             </button>
         </div>
     `;
+    
+    // Render task status tabs
+    renderTaskStatusTabs();
 }
 
-async function loadTasks(workflowId, page = 1) {
+async function loadTasks(workflowId, page = 1, status = state.tasksStatus) {
     try {
         state.tasksPage = page;
+        state.tasksStatus = status;
         const offset = (page - 1) * state.tasksPageSize;
-        const response = await apiRequest(`/tasks?workflow_id=${workflowId}&limit=${state.tasksPageSize}&offset=${offset}`);
-        state.tasks = response.tasks || [];
-        state.tasksTotal = response.total || 0;
+        
+        // Build query parameters
+        let queryParams = `workflow_id=${workflowId}&limit=${state.tasksPageSize}&offset=${offset}`;
+        
+        // Map 'completed' to both 'completed' and 'failed' statuses
+        if (status && status !== 'all') {
+            if (status === 'completed') {
+                // For completed tab, we'll filter client-side to show both completed and failed
+                // Don't add status filter to API, we'll get all and filter
+                queryParams += '&status='; // This will be handled by loading all and filtering
+            } else {
+                queryParams += `&status=${status}`;
+            }
+        }
+        
+        const response = await apiRequest(`/tasks?${queryParams}`);
+        let tasks = response.tasks || [];
+        
+        // If showing completed tab, filter to include both completed and failed
+        if (status === 'completed') {
+            // We need to fetch without status filter to get both
+            const allResponse = await apiRequest(`/tasks?workflow_id=${workflowId}&limit=1000&offset=0`);
+            tasks = (allResponse.tasks || []).filter(t => 
+                t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'
+            );
+            // Apply pagination manually
+            const start = offset;
+            const end = start + state.tasksPageSize;
+            state.tasksTotal = tasks.length;
+            tasks = tasks.slice(start, end);
+        } else {
+            state.tasksTotal = response.total || 0;
+        }
+        
+        state.tasks = tasks;
         renderTaskList();
     } catch (error) {
         console.error('Failed to load tasks:', error);
     }
 }
 
+function renderTaskStatusTabs() {
+    const container = document.getElementById('contentBody');
+    
+    const tabs = `
+        <div class="task-status-tabs">
+            <button class="tab-button ${state.tasksStatus === 'all' ? 'active' : ''}" 
+                onclick="switchTaskStatus('all')">
+                All
+            </button>
+            <button class="tab-button ${state.tasksStatus === 'running' ? 'active' : ''}" 
+                onclick="switchTaskStatus('running')">
+                <span class="tab-icon">▶️</span> Running
+            </button>
+            <button class="tab-button ${state.tasksStatus === 'pending' ? 'active' : ''}" 
+                onclick="switchTaskStatus('pending')">
+                <span class="tab-icon">⏳</span> Pending
+            </button>
+            <button class="tab-button ${state.tasksStatus === 'completed' ? 'active' : ''}" 
+                onclick="switchTaskStatus('completed')">
+                <span class="tab-icon">✅</span> Completed
+            </button>
+        </div>
+    `;
+    
+    // Insert tabs before task list
+    const existingTabs = container.querySelector('.task-status-tabs');
+    if (existingTabs) {
+        existingTabs.remove();
+    }
+    container.insertAdjacentHTML('afterbegin', tabs);
+}
+
+function switchTaskStatus(status) {
+    state.tasksStatus = status;
+    loadTasks(state.currentWorkflowId, 1, status);
+}
+
 function renderTaskList() {
     const container = document.getElementById('contentBody');
     
+    // Ensure tabs are rendered
+    if (!container.querySelector('.task-status-tabs')) {
+        renderTaskStatusTabs();
+    }
+    
+    // Find or create task list container
+    let taskListContainer = container.querySelector('.task-list-container');
+    if (!taskListContainer) {
+        taskListContainer = document.createElement('div');
+        taskListContainer.className = 'task-list-container';
+        container.appendChild(taskListContainer);
+    }
+    
     if (state.tasks.length === 0) {
-        container.innerHTML = `
+        taskListContainer.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">📋</div>
-                <h3>No tasks yet</h3>
-                <p>Scan files to create tasks</p>
+                <h3>No ${state.tasksStatus === 'all' ? '' : state.tasksStatus} tasks</h3>
+                <p>${state.tasksStatus === 'all' ? 'Scan files to create tasks' : `No tasks with status: ${state.tasksStatus}`}</p>
             </div>
         `;
         return;
@@ -173,18 +260,18 @@ function renderTaskList() {
     const startItem = (state.tasksPage - 1) * state.tasksPageSize + 1;
     const endItem = Math.min(state.tasksPage * state.tasksPageSize, state.tasksTotal);
     
-    container.innerHTML = `
+    taskListContainer.innerHTML = `
         <div class="task-list">
             ${state.tasks.map(task => renderTaskCard(task)).join('')}
         </div>
         ${totalPages > 1 ? `
         <div class="pagination">
             <div class="pagination-info">
-                Showing ${startItem}-${endItem} of ${state.tasksTotal} tasks
+                Showing ${startItem}-${endItem} of ${state.tasksTotal} ${state.tasksStatus === 'all' ? '' : state.tasksStatus} tasks
             </div>
             <div class="pagination-controls">
                 <button class="btn btn-secondary btn-small" 
-                    onclick="loadTasks('${state.currentWorkflowId}', ${state.tasksPage - 1})"
+                    onclick="loadTasks('${state.currentWorkflowId}', ${state.tasksPage - 1}, '${state.tasksStatus}')"
                     ${state.tasksPage === 1 ? 'disabled' : ''}>
                     ← Previous
                 </button>
@@ -192,7 +279,7 @@ function renderTaskList() {
                     Page ${state.tasksPage} of ${totalPages}
                 </span>
                 <button class="btn btn-secondary btn-small" 
-                    onclick="loadTasks('${state.currentWorkflowId}', ${state.tasksPage + 1})"
+                    onclick="loadTasks('${state.currentWorkflowId}', ${state.tasksPage + 1}, '${state.tasksStatus}')"
                     ${state.tasksPage === totalPages ? 'disabled' : ''}>
                     Next →
                 </button>
