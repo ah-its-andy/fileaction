@@ -27,7 +27,7 @@ steps:
       echo "Input file is valid, proceeding with conversion"
       
   - name: imagemagick-convert
-    run: magick "${{ input_path }}" -quality 85 "${{ output_path }}"
+    run: magick "${{ input_path }}" -quality 100 "${{ output_path }}"
     env:
       MAGICK_THREAD_LIMIT: "1"
       
