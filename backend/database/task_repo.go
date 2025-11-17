@@ -151,3 +151,17 @@ func (r *TaskRepo) GetPendingTasks(limit int) ([]*models.Task, error) {
 
 	return tasks, nil
 }
+
+// ResetRunningTasks resets all running tasks to pending status
+// This should be called on application startup to handle tasks that were interrupted
+func (r *TaskRepo) ResetRunningTasks() (int, error) {
+	result := r.db.conn.Model(&TaskModel{}).
+		Where("status = ?", models.TaskStatusRunning).
+		Update("status", models.TaskStatusPending)
+	
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	
+	return int(result.RowsAffected), nil
+}

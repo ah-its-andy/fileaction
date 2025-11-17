@@ -59,6 +59,15 @@ func main() {
 	defer db.Close()
 	log.Println("Database initialized")
 
+	// Reset running tasks to pending status on startup
+	taskRepo := database.NewTaskRepo(db)
+	resetCount, err := taskRepo.ResetRunningTasks()
+	if err != nil {
+		log.Printf("Warning: Failed to reset running tasks: %v", err)
+	} else if resetCount > 0 {
+		log.Printf("Reset %d running task(s) to pending status", resetCount)
+	}
+
 	// Initialize executor
 	exec := executor.New(
 		db,
