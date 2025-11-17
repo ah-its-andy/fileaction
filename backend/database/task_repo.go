@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/andi/fileaction/backend/models"
 	"github.com/google/uuid"
@@ -142,5 +143,11 @@ func (r *TaskRepo) GetPendingTasks(limit int) ([]*models.Task, error) {
 	for i, model := range modelList {
 		tasks[i] = model.ToTask()
 	}
+
+	// Debug logging
+	if len(tasks) > 0 {
+		log.Printf("GetPendingTasks: found %d pending tasks (limit: %d)", len(tasks), limit)
+	}
+
 	return tasks, nil
 }

@@ -92,10 +92,14 @@ func (s *Scheduler) run() {
 func (s *Scheduler) scanAndExecute() {
 	s.mu.Lock()
 	availableSlots := s.maxRunning - s.runningCount
+	currentRunning := s.runningCount
 	s.mu.Unlock()
+
+	log.Printf("Scheduler scan: running=%d, max=%d, available=%d", currentRunning, s.maxRunning, availableSlots)
 
 	if availableSlots <= 0 {
 		// No available slots, wait for running tasks to complete
+		log.Println("No available slots, skipping scan")
 		return
 	}
 
@@ -107,6 +111,7 @@ func (s *Scheduler) scanAndExecute() {
 	}
 
 	if len(tasks) == 0 {
+		log.Println("No pending tasks found")
 		return
 	}
 

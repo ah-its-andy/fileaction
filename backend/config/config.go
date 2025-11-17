@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -110,6 +111,11 @@ func LoadFromEnv(path string) (*Config, error) {
 	if logDir := os.Getenv("LOG_DIR"); logDir != "" {
 		cfg.Logging.Dir = logDir
 		cfg.Logging.AppLog = logDir + "/app.log"
+	}
+	if maxRunning := os.Getenv("MAX_RUNNING"); maxRunning != "" {
+		if val, err := strconv.Atoi(maxRunning); err == nil && val > 0 {
+			cfg.Scheduler.MaxRunning = val
+		}
 	}
 
 	return cfg, nil

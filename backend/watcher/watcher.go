@@ -569,6 +569,9 @@ func (w *Watcher) scanFile(workflowID, filePath string, workflowDef *workflow.Wo
 
 	// Create task if file is new or changed
 	if fileChanged || !workflowDef.Options.SkipOnNoChange {
+		// Wait if pending task limit is reached for this workflow
+		w.waitForTaskSlot(workflowID)
+
 		outputPath := workflow.GenerateOutputPath(filePath, workflowDef.Convert, workflowDef.Options.OutputDirPattern)
 
 		task := &models.Task{
@@ -682,4 +685,36 @@ func (w *Watcher) DisableWorkflow(workflowID string) error {
 // ScanWorkflow scans a workflow (public method for API)
 func (w *Watcher) ScanWorkflow(workflowID string) (*ScanResult, error) {
 	return w.scanWorkflow(workflowID)
+}
+
+// waitForTaskSlot waits until pending task count is below 50 for the given workflow
+func (w *Watcher) waitForTaskSlot(workflowID string) {
+	const maxPending = 50
+	const checkInterval = 2 * time.Second
+
+	for {
+		// Check if stopped
+		select {
+		case <-w.stopChan:
+			return
+		default:
+		}
+
+		// Get pending task count for this workflow
+		pendingCount, err := w.taskRepo.Count(workflowID, models.TaskStatusPending)
+		if err != nil {
+			log.Printf("Warning: Failed to count pending tasks for workflow %s: %v", workflowID, err)
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		// If below limit, proceed
+		if pendingCount < maxPending {
+			return
+		}
+
+		// Log and wait
+		log.Printf("Workflow %s: Pending task limit reached (%d/%d), waiting for tasks to be processed...", workflowID, pendingCount, maxPending)
+		time.Sleep(checkInterval)
+	}
 }

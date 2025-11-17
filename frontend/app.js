@@ -155,37 +155,15 @@ async function loadTasks(workflowId, page = 1, status = state.tasksStatus) {
         // Build query parameters
         let queryParams = `workflow_id=${workflowId}&limit=${state.tasksPageSize}&offset=${offset}`;
         
-        // Map 'completed' to both 'completed' and 'failed' statuses
+        // Add status filter based on active tab
         if (status && status !== 'all') {
-            if (status === 'completed') {
-                // For completed tab, we'll filter client-side to show both completed and failed
-                // Don't add status filter to API, we'll get all and filter
-                queryParams += '&status='; // This will be handled by loading all and filtering
-            } else {
-                queryParams += `&status=${status}`;
-            }
+            queryParams += `&status=${status}`;
         }
         
         const response = await apiRequest(`/tasks?${queryParams}`);
-        let tasks = response.tasks || [];
+        state.tasks = response.tasks || [];
+        state.tasksTotal = response.total || 0;
         
-        // If showing completed tab, filter to include both completed and failed
-        if (status === 'completed') {
-            // We need to fetch without status filter to get both
-            const allResponse = await apiRequest(`/tasks?workflow_id=${workflowId}&limit=1000&offset=0`);
-            tasks = (allResponse.tasks || []).filter(t => 
-                t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'
-            );
-            // Apply pagination manually
-            const start = offset;
-            const end = start + state.tasksPageSize;
-            state.tasksTotal = tasks.length;
-            tasks = tasks.slice(start, end);
-        } else {
-            state.tasksTotal = response.total || 0;
-        }
-        
-        state.tasks = tasks;
         renderTaskList();
     } catch (error) {
         console.error('Failed to load tasks:', error);
@@ -201,17 +179,21 @@ function renderTaskStatusTabs() {
                 onclick="switchTaskStatus('all')">
                 All
             </button>
-            <button class="tab-button ${state.tasksStatus === 'running' ? 'active' : ''}" 
-                onclick="switchTaskStatus('running')">
-                <span class="tab-icon">▶️</span> Running
-            </button>
             <button class="tab-button ${state.tasksStatus === 'pending' ? 'active' : ''}" 
                 onclick="switchTaskStatus('pending')">
                 <span class="tab-icon">⏳</span> Pending
             </button>
+            <button class="tab-button ${state.tasksStatus === 'running' ? 'active' : ''}" 
+                onclick="switchTaskStatus('running')">
+                <span class="tab-icon">▶️</span> Running
+            </button>
             <button class="tab-button ${state.tasksStatus === 'completed' ? 'active' : ''}" 
                 onclick="switchTaskStatus('completed')">
                 <span class="tab-icon">✅</span> Completed
+            </button>
+            <button class="tab-button ${state.tasksStatus === 'failed' ? 'active' : ''}" 
+                onclick="switchTaskStatus('failed')">
+                <span class="tab-icon">❌</span> Failed
             </button>
         </div>
     `;
