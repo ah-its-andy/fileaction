@@ -7,10 +7,30 @@ convert:
   from: jpeg
   to: heic
 steps:
+  - name: check-input
+    run: |
+      # Check if input file exists and is valid
+      if [ ! -f "${{ input_path }}" ]; then
+        echo "Error: Input file does not exist"
+        exit 101
+      fi
+      
+      # Check if output already exists and is newer than input
+      if [ -f "${{ output_path }}" ]; then
+        if [ "${{ output_path }}" -nt "${{ input_path }}" ]; then
+          echo "Output file already exists and is up-to-date, skipping conversion"
+          exit 100
+        fi
+        echo "Output exists but is older, will re-convert"
+      fi
+      
+      echo "Input file is valid, proceeding with conversion"
+      
   - name: imagemagick-convert
     run: magick "${{ input_path }}" -quality 85 "${{ output_path }}"
     env:
       MAGICK_THREAD_LIMIT: "1"
+      
   - name: verify-conversion
     run: |
       # Check if output file exists and has size > 0

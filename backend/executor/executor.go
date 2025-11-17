@@ -17,6 +17,24 @@ import (
 	"github.com/andi/fileaction/backend/workflow"
 )
 
+// WorkflowStopSuccess indicates workflow should stop with success status
+type WorkflowStopSuccess struct {
+	Message string
+}
+
+func (e *WorkflowStopSuccess) Error() string {
+	return e.Message
+}
+
+// WorkflowStopFailure indicates workflow should stop with failure status
+type WorkflowStopFailure struct {
+	Message string
+}
+
+func (e *WorkflowStopFailure) Error() string {
+	return e.Message
+}
+
 // Executor handles task execution
 type Executor struct {
 	taskRepo     *database.TaskRepo
@@ -214,6 +232,9 @@ func (e *Executor) executeTask(taskID string) error {
 
 	// Execute steps
 	allStepsSucceeded := true
+	workflowStoppedWithSuccess := false
+	workflowStoppedWithFailure := false
+
 	for i, step := range workflowDef.Steps {
 		writeLog(logWriter, fmt.Sprintf("\n--- Step %d: %s ---", i+1, step.Name))
 
@@ -232,6 +253,20 @@ func (e *Executor) executeTask(taskID string) error {
 
 		// Execute step
 		if err := e.executeStep(ctx, stepModel, step, vars, workflowDef.Env, logWriter); err != nil {
+			// Check for workflow control errors
+			if stopSuccess, ok := err.(*WorkflowStopSuccess); ok {
+				writeLog(logWriter, fmt.Sprintf("INFO: %s", stopSuccess.Message))
+				workflowStoppedWithSuccess = true
+				break
+			}
+			if stopFailure, ok := err.(*WorkflowStopFailure); ok {
+				writeLog(logWriter, fmt.Sprintf("INFO: %s", stopFailure.Message))
+				workflowStoppedWithFailure = true
+				allStepsSucceeded = false
+				break
+			}
+
+			// Regular step failure
 			writeLog(logWriter, fmt.Sprintf("ERROR: Step failed: %v", err))
 			allStepsSucceeded = false
 			break
@@ -249,12 +284,16 @@ func (e *Executor) executeTask(taskID string) error {
 	completedAt := time.Now()
 	task.CompletedAt = &completedAt
 
-	if allStepsSucceeded {
+	if workflowStoppedWithSuccess || allStepsSucceeded {
 		task.Status = models.TaskStatusCompleted
 		writeLog(logWriter, "\nTask completed successfully")
 	} else {
 		task.Status = models.TaskStatusFailed
-		task.ErrorMessage = "One or more steps failed"
+		if workflowStoppedWithFailure {
+			task.ErrorMessage = "Workflow stopped with failure"
+		} else {
+			task.ErrorMessage = "One or more steps failed"
+		}
 		writeLog(logWriter, "\nTask failed")
 	}
 
@@ -344,9 +383,31 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 	stepModel.Stdout = stdout.String()
 	stepModel.Stderr = stderr.String()
 
-	if exitCode == 0 {
+	// Handle special exit codes:
+	// 0: Success (continue to next step)
+	// 100: Success and stop workflow (task succeeds)
+	// 101: Failure and stop workflow (task fails)
+	// Other non-zero: Step failure (task fails)
+	stopWorkflow := false
+	forceTaskSuccess := false
+	forceTaskFailure := false
+
+	switch exitCode {
+	case 0:
 		stepModel.Status = models.StepStatusCompleted
-	} else {
+	case 100:
+		// Success and stop workflow
+		stepModel.Status = models.StepStatusCompleted
+		stopWorkflow = true
+		forceTaskSuccess = true
+		writeLog(logWriter, "INFO: Workflow stopped with success (exit code 100)")
+	case 101:
+		// Failure and stop workflow
+		stepModel.Status = models.StepStatusFailed
+		stopWorkflow = true
+		forceTaskFailure = true
+		writeLog(logWriter, "INFO: Workflow stopped with failure (exit code 101)")
+	default:
 		stepModel.Status = models.StepStatusFailed
 	}
 
@@ -354,7 +415,17 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 		return fmt.Errorf("failed to update step: %w", err)
 	}
 
-	if exitCode != 0 {
+	// Return special error types for workflow control
+	if stopWorkflow {
+		if forceTaskSuccess {
+			return &WorkflowStopSuccess{Message: "Workflow stopped with success"}
+		}
+		if forceTaskFailure {
+			return &WorkflowStopFailure{Message: "Workflow stopped with failure"}
+		}
+	}
+
+	if exitCode != 0 && exitCode != 100 {
 		return fmt.Errorf("step exited with code %d", exitCode)
 	}
 

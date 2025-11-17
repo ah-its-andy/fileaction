@@ -1,0 +1,55 @@
+name: conditional-processing
+description: Example workflow demonstrating early exit with success/failure
+on:
+  paths:
+    - ./library/test
+convert:
+  from: txt
+  to: processed
+steps:
+  - name: check-file-size
+    run: |
+      file_size=$(stat -f%z "${{ input_path }}" 2>/dev/null || stat -c%s "${{ input_path }}")
+      echo "File size: $file_size bytes"
+      
+      # If file is empty, skip processing and mark as success
+      if [ "$file_size" -eq 0 ]; then
+        echo "File is empty, skipping processing"
+        exit 100  # Exit with success and stop workflow
+      fi
+      
+      # If file is too large (>10MB), fail the task
+      if [ "$file_size" -gt 10485760 ]; then
+        echo "File is too large (>10MB), cannot process"
+        exit 101  # Exit with failure and stop workflow
+      fi
+      
+      echo "File size is acceptable, continue processing"
+
+  - name: validate-content
+    run: |
+      # Check if file contains specific patterns
+      if grep -q "SKIP_PROCESSING" "${{ input_path }}"; then
+        echo "File contains SKIP_PROCESSING marker"
+        exit 100  # Success exit - file is intentionally skipped
+      fi
+      
+      if grep -q "ERROR_MARKER" "${{ input_path }}"; then
+        echo "File contains ERROR_MARKER"
+        exit 101  # Failure exit - file has errors
+      fi
+      
+      echo "Content validation passed"
+
+  - name: process-file
+    run: |
+      # This step only runs if previous steps didn't exit early
+      cp "${{ input_path }}" "${{ output_path }}"
+      echo "Processed at $(date)" >> "${{ output_path }}"
+      echo "File processed successfully"
+
+options:
+  concurrency: 1
+  include_subdirs: true
+  file_glob: "*.txt"
+  output_dir_pattern: "../processed"
