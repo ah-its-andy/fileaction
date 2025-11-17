@@ -158,10 +158,10 @@ func (r *TaskRepo) ResetRunningTasks() (int, error) {
 	result := r.db.conn.Model(&TaskModel{}).
 		Where("status = ?", models.TaskStatusRunning).
 		Update("status", models.TaskStatusPending)
-	
+
 	if result.Error != nil {
 		return 0, result.Error
 	}
-	
+
 	return int(result.RowsAffected), nil
 }
