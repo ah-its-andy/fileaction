@@ -14,7 +14,7 @@ import (
 	"github.com/andi/fileaction/backend/config"
 	"github.com/andi/fileaction/backend/database"
 	"github.com/andi/fileaction/backend/executor"
-	"github.com/andi/fileaction/backend/scanner"
+	"github.com/andi/fileaction/backend/scheduler"
 	"github.com/andi/fileaction/backend/watcher"
 )
 
@@ -57,29 +57,28 @@ func main() {
 	defer db.Close()
 	log.Println("Database initialized")
 
-	// Initialize scanner
-	scan := scanner.New(db)
-	log.Println("Scanner initialized")
-
 	// Initialize executor
 	exec := executor.New(
 		db,
 		cfg.Logging.Dir,
-		cfg.Execution.DefaultConcurrency,
 		cfg.Execution.TaskTimeout,
 		cfg.Execution.StepTimeout,
 	)
-	exec.Start()
-	defer exec.Stop()
 	log.Println("Executor initialized")
 
-	// Process any pending tasks from previous run
-	if err := exec.ProcessPendingTasks(); err != nil {
-		log.Printf("Warning: Failed to process pending tasks: %v", err)
-	}
+	// Initialize scheduler
+	sched := scheduler.New(
+		db,
+		exec,
+		cfg.Scheduler.MaxRunning,
+		cfg.Scheduler.ScanInterval,
+	)
+	sched.Start()
+	defer sched.Stop()
+	log.Println("Scheduler initialized and started")
 
 	// Initialize file watcher
-	watch, err := watcher.New(db, exec, scan)
+	watch, err := watcher.New(db)
 	if err != nil {
 		log.Fatalf("Failed to initialize file watcher: %v", err)
 	}
@@ -90,7 +89,7 @@ func main() {
 	log.Println("File watcher initialized and started")
 
 	// Initialize API server
-	server := api.New(db, exec, scan, cfg.Logging.Dir)
+	server := api.New(db, sched, watch, cfg.Logging.Dir)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
 	// Setup graceful shutdown
@@ -125,9 +124,9 @@ func main() {
 			log.Printf("Error shutting down server: %v", err)
 		}
 
-		// Stop executor (this will wait for running tasks to complete or timeout)
-		log.Println("Stopping executor...")
-		exec.Stop()
+		// Stop scheduler (this will wait for running tasks to complete or timeout)
+		log.Println("Stopping scheduler...")
+		sched.Stop()
 
 		// Close database connections
 		log.Println("Closing database connections...")

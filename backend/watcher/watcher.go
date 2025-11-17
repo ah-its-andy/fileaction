@@ -1,6 +1,9 @@
 package watcher
 
 import (
+	"crypto/md5"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -8,18 +11,26 @@ import (
 	"time"
 
 	"github.com/andi/fileaction/backend/database"
-	"github.com/andi/fileaction/backend/executor"
 	"github.com/andi/fileaction/backend/models"
-	"github.com/andi/fileaction/backend/scanner"
 	"github.com/andi/fileaction/backend/workflow"
 	"github.com/fsnotify/fsnotify"
 )
 
+// ScanResult represents the result of a scan operation
+type ScanResult struct {
+	FilesScanned int
+	FilesNew     int
+	FilesChanged int
+	FilesSkipped int
+	TasksCreated int
+	Errors       []error
+}
+
 // Watcher monitors file system changes and triggers workflows
 type Watcher struct {
 	db           *database.DB
-	executor     *executor.Executor
-	scanner      *scanner.Scanner
+	fileRepo     *database.FileRepo
+	taskRepo     *database.TaskRepo
 	workflowRepo *database.WorkflowRepo
 	watcher      *fsnotify.Watcher
 	stopChan     chan struct{}
@@ -42,7 +53,7 @@ type debounceEntry struct {
 }
 
 // New creates a new file watcher
-func New(db *database.DB, exec *executor.Executor, scan *scanner.Scanner) (*Watcher, error) {
+func New(db *database.DB) (*Watcher, error) {
 	fsWatcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -50,8 +61,8 @@ func New(db *database.DB, exec *executor.Executor, scan *scanner.Scanner) (*Watc
 
 	return &Watcher{
 		db:           db,
-		executor:     exec,
-		scanner:      scan,
+		fileRepo:     database.NewFileRepo(db),
+		taskRepo:     database.NewTaskRepo(db),
 		workflowRepo: database.NewWorkflowRepo(db),
 		watcher:      fsWatcher,
 		stopChan:     make(chan struct{}),
@@ -68,12 +79,23 @@ func (w *Watcher) Start() error {
 		return err
 	}
 
-	// Add watches for each workflow
+	// Scan and watch each enabled workflow
 	for _, wf := range workflows {
 		if !wf.Enabled {
 			continue
 		}
 
+		// Perform initial scan
+		log.Printf("Performing initial scan for workflow: %s", wf.Name)
+		result, err := w.scanWorkflow(wf.ID)
+		if err != nil {
+			log.Printf("Warning: Failed to scan workflow %s: %v", wf.Name, err)
+		} else {
+			log.Printf("Scan completed for workflow %s: scanned=%d, new=%d, changed=%d, skipped=%d, tasks=%d",
+				wf.Name, result.FilesScanned, result.FilesNew, result.FilesChanged, result.FilesSkipped, result.TasksCreated)
+		}
+
+		// Add file system watches
 		if err := w.addWorkflowWatch(wf); err != nil {
 			log.Printf("Warning: Failed to add watch for workflow %s: %v", wf.Name, err)
 		}
@@ -268,20 +290,15 @@ func (w *Watcher) processFile(wf *models.Workflow, filePath string) {
 		return
 	}
 
-	// Use scanner to process the file (need to export scanFile method)
-	// For now, we'll create a temporary implementation
-	fileRepo := database.NewFileRepo(w.db)
-	taskRepo := database.NewTaskRepo(w.db)
-
 	// Calculate file MD5
-	md5Hash, fileSize, err := scanner.CalculateMD5(filePath)
+	md5Hash, fileSize, err := w.calculateMD5(filePath)
 	if err != nil {
 		log.Printf("Error calculating MD5 for %s: %v", filePath, err)
 		return
 	}
 
 	now := time.Now()
-	existingFile, err := fileRepo.GetByWorkflowAndPath(wf.ID, filePath)
+	existingFile, err := w.fileRepo.GetByWorkflowAndPath(wf.ID, filePath)
 	if err != nil {
 		log.Printf("Error checking file index: %v", err)
 		return
@@ -299,7 +316,7 @@ func (w *Watcher) processFile(wf *models.Workflow, filePath string) {
 			FileSize:      fileSize,
 			LastScannedAt: now,
 		}
-		if err := fileRepo.Create(file); err != nil {
+		if err := w.fileRepo.Create(file); err != nil {
 			log.Printf("Error creating file record: %v", err)
 			return
 		}
@@ -312,7 +329,7 @@ func (w *Watcher) processFile(wf *models.Workflow, filePath string) {
 			existingFile.FileMD5 = md5Hash
 			existingFile.FileSize = fileSize
 			existingFile.LastScannedAt = now
-			if err := fileRepo.Update(existingFile); err != nil {
+			if err := w.fileRepo.Update(existingFile); err != nil {
 				log.Printf("Error updating file record: %v", err)
 				return
 			}
@@ -336,15 +353,12 @@ func (w *Watcher) processFile(wf *models.Workflow, filePath string) {
 			Status:     models.TaskStatusPending,
 		}
 
-		if err := taskRepo.Create(task); err != nil {
+		if err := w.taskRepo.Create(task); err != nil {
 			log.Printf("Error creating task: %v", err)
 			return
 		}
 
 		log.Printf("Task created for file: %s -> %s", filePath, outputPath)
-
-		// Submit task to executor
-		w.executor.SubmitTask(task.ID)
 	}
 }
 
@@ -389,4 +403,283 @@ func (w *Watcher) ReloadWorkflows() error {
 
 	log.Printf("Workflows reloaded, monitoring %d workflow(s)", len(w.watchedPaths))
 	return nil
+}
+
+// scanWorkflow scans all paths for a workflow and creates tasks
+func (w *Watcher) scanWorkflow(workflowID string) (*ScanResult, error) {
+	result := &ScanResult{}
+
+	// Get workflow
+	wf, err := w.workflowRepo.GetByID(workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow: %w", err)
+	}
+
+	// Parse workflow
+	workflowDef, err := workflow.Parse(wf.YAMLContent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse workflow: %w", err)
+	}
+
+	// Scan each path
+	for _, scanPath := range workflowDef.On.Paths {
+		pathResult, err := w.scanPath(workflowID, scanPath, workflowDef)
+		if err != nil {
+			result.Errors = append(result.Errors, err)
+			continue
+		}
+
+		result.FilesScanned += pathResult.FilesScanned
+		result.FilesNew += pathResult.FilesNew
+		result.FilesChanged += pathResult.FilesChanged
+		result.FilesSkipped += pathResult.FilesSkipped
+		result.TasksCreated += pathResult.TasksCreated
+		result.Errors = append(result.Errors, pathResult.Errors...)
+	}
+
+	return result, nil
+}
+
+// scanPath scans a single path
+func (w *Watcher) scanPath(workflowID, scanPath string, workflowDef *workflow.WorkflowDef) (*ScanResult, error) {
+	result := &ScanResult{}
+
+	// Resolve absolute path
+	absPath, err := filepath.Abs(scanPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path %s: %w", scanPath, err)
+	}
+
+	// Check if path exists
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("path not found %s: %w", absPath, err)
+	}
+
+	// If it's a file, scan just that file
+	if !info.IsDir() {
+		if err := w.scanFile(workflowID, absPath, workflowDef, result); err != nil {
+			result.Errors = append(result.Errors, err)
+		}
+		return result, nil
+	}
+
+	// Walk directory
+	walkFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			// Skip subdirectories if not enabled
+			if !workflowDef.Options.IncludeSubdirs && path != absPath {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Check if file matches glob pattern
+		if !workflow.MatchesFileGlob(path, workflowDef.Options.FileGlob) {
+			return nil
+		}
+
+		// Scan file
+		if err := w.scanFile(workflowID, path, workflowDef, result); err != nil {
+			result.Errors = append(result.Errors, err)
+		}
+
+		return nil
+	}
+
+	if err := filepath.Walk(absPath, walkFn); err != nil {
+		return nil, fmt.Errorf("failed to walk directory %s: %w", absPath, err)
+	}
+
+	return result, nil
+}
+
+// scanFile processes a single file during scan
+func (w *Watcher) scanFile(workflowID, filePath string, workflowDef *workflow.WorkflowDef, result *ScanResult) error {
+	result.FilesScanned++
+
+	// Double-check if file matches glob pattern before processing
+	if !workflow.MatchesFileGlob(filePath, workflowDef.Options.FileGlob) {
+		log.Printf("File %s does not match glob pattern %s, skipping", filePath, workflowDef.Options.FileGlob)
+		result.FilesSkipped++
+		return nil
+	}
+
+	// Calculate MD5
+	md5Hash, fileSize, err := w.calculateMD5(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate MD5 for %s: %w", filePath, err)
+	}
+
+	now := time.Now()
+
+	// Check if file already indexed
+	existingFile, err := w.fileRepo.GetByWorkflowAndPath(workflowID, filePath)
+	if err != nil {
+		return fmt.Errorf("failed to check file index: %w", err)
+	}
+
+	fileChanged := false
+	var fileID string
+
+	if existingFile == nil {
+		// New file
+		file := &models.File{
+			WorkflowID:    workflowID,
+			FilePath:      filePath,
+			FileMD5:       md5Hash,
+			FileSize:      fileSize,
+			LastScannedAt: now,
+		}
+		if err := w.fileRepo.Create(file); err != nil {
+			return fmt.Errorf("failed to create file record: %w", err)
+		}
+		fileID = file.ID
+		result.FilesNew++
+		fileChanged = true
+		log.Printf("New file detected: %s", filePath)
+	} else {
+		// Existing file
+		fileID = existingFile.ID
+		if existingFile.FileMD5 != md5Hash {
+			// File changed
+			existingFile.FileMD5 = md5Hash
+			existingFile.FileSize = fileSize
+			existingFile.LastScannedAt = now
+			if err := w.fileRepo.Update(existingFile); err != nil {
+				return fmt.Errorf("failed to update file record: %w", err)
+			}
+			result.FilesChanged++
+			fileChanged = true
+			log.Printf("File changed: %s", filePath)
+		} else {
+			// File unchanged
+			result.FilesSkipped++
+			if workflowDef.Options.SkipOnNoChange {
+				log.Printf("File unchanged, skipping: %s", filePath)
+				return nil
+			}
+		}
+	}
+
+	// Create task if file is new or changed
+	if fileChanged || !workflowDef.Options.SkipOnNoChange {
+		outputPath := workflow.GenerateOutputPath(filePath, workflowDef.Convert, workflowDef.Options.OutputDirPattern)
+
+		task := &models.Task{
+			WorkflowID: workflowID,
+			FileID:     fileID,
+			InputPath:  filePath,
+			OutputPath: outputPath,
+			Status:     models.TaskStatusPending,
+		}
+
+		if err := w.taskRepo.Create(task); err != nil {
+			return fmt.Errorf("failed to create task: %w", err)
+		}
+
+		result.TasksCreated++
+		log.Printf("Task created for file: %s -> %s", filePath, outputPath)
+	}
+
+	return nil
+}
+
+// calculateMD5 calculates the MD5 hash of a file
+func (w *Watcher) calculateMD5(filePath string) (string, int64, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", 0, err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return fmt.Sprintf("%x", hash.Sum(nil)), size, nil
+}
+
+// EnableWorkflow enables a workflow and starts watching it
+func (w *Watcher) EnableWorkflow(workflowID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Check if already watching
+	if _, exists := w.watchedPaths[workflowID]; exists {
+		log.Printf("Workflow %s is already being watched", workflowID)
+		return nil
+	}
+
+	// Get workflow
+	wf, err := w.workflowRepo.GetByID(workflowID)
+	if err != nil {
+		return fmt.Errorf("failed to get workflow: %w", err)
+	}
+
+	// Perform initial scan
+	log.Printf("Performing initial scan for enabled workflow: %s", wf.Name)
+	result, err := w.scanWorkflow(workflowID)
+	if err != nil {
+		log.Printf("Warning: Failed to scan workflow %s: %v", wf.Name, err)
+	} else {
+		log.Printf("Scan completed for workflow %s: scanned=%d, new=%d, changed=%d, skipped=%d, tasks=%d",
+			wf.Name, result.FilesScanned, result.FilesNew, result.FilesChanged, result.FilesSkipped, result.TasksCreated)
+	}
+
+	// Add file system watches
+	if err := w.addWorkflowWatch(wf); err != nil {
+		return fmt.Errorf("failed to add watch for workflow %s: %w", wf.Name, err)
+	}
+
+	log.Printf("Workflow %s enabled and watching started", wf.Name)
+	return nil
+}
+
+// DisableWorkflow disables a workflow and stops watching it
+func (w *Watcher) DisableWorkflow(workflowID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Get watched paths
+	paths, exists := w.watchedPaths[workflowID]
+	if !exists {
+		log.Printf("Workflow %s is not being watched", workflowID)
+		return nil
+	}
+
+	// Remove file system watches
+	for _, path := range paths {
+		if err := w.watcher.Remove(path); err != nil {
+			log.Printf("Warning: Failed to remove watch for path %s: %v", path, err)
+		}
+	}
+
+	// Remove from watched paths map
+	delete(w.watchedPaths, workflowID)
+
+	// Cancel any pending debounce timers for this workflow
+	w.debounceMu.Lock()
+	for key, entry := range w.debounceMap {
+		if entry.workflowID == workflowID {
+			entry.timer.Stop()
+			delete(w.debounceMap, key)
+		}
+	}
+	w.debounceMu.Unlock()
+
+	log.Printf("Workflow %s disabled and watching stopped", workflowID)
+	return nil
+}
+
+// ScanWorkflow scans a workflow (public method for API)
+func (w *Watcher) ScanWorkflow(workflowID string) (*ScanResult, error) {
+	return w.scanWorkflow(workflowID)
 }

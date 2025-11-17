@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/andi/fileaction/backend/database"
@@ -41,20 +40,12 @@ type Executor struct {
 	stepRepo     *database.TaskStepRepo
 	workflowRepo *database.WorkflowRepo
 	logDir       string
-	concurrency  int
 	taskTimeout  time.Duration
 	stepTimeout  time.Duration
-	workers      int
-	taskQueue    chan string
-	stopChan     chan struct{}
-	stopped      bool
-	wg           sync.WaitGroup
-	mu           sync.Mutex
-	runningTasks map[string]context.CancelFunc
 }
 
 // New creates a new executor
-func New(db *database.DB, logDir string, concurrency int, taskTimeout, stepTimeout time.Duration) *Executor {
+func New(db *database.DB, logDir string, taskTimeout, stepTimeout time.Duration) *Executor {
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		log.Printf("Failed to create log directory: %v", err)
 	}
@@ -64,93 +55,13 @@ func New(db *database.DB, logDir string, concurrency int, taskTimeout, stepTimeo
 		stepRepo:     database.NewTaskStepRepo(db),
 		workflowRepo: database.NewWorkflowRepo(db),
 		logDir:       logDir,
-		concurrency:  concurrency,
 		taskTimeout:  taskTimeout,
 		stepTimeout:  stepTimeout,
-		taskQueue:    make(chan string, 100),
-		stopChan:     make(chan struct{}),
-		runningTasks: make(map[string]context.CancelFunc),
 	}
 }
 
-// Start starts the executor workers
-func (e *Executor) Start() {
-	log.Printf("Starting executor with %d workers", e.concurrency)
-	for i := 0; i < e.concurrency; i++ {
-		e.wg.Add(1)
-		go e.worker(i)
-	}
-}
-
-// Stop stops the executor
-func (e *Executor) Stop() {
-	e.mu.Lock()
-	if e.stopped {
-		e.mu.Unlock()
-		return
-	}
-	e.stopped = true
-	e.mu.Unlock()
-
-	log.Println("Stopping executor...")
-	close(e.stopChan)
-	e.wg.Wait()
-	log.Println("Executor stopped")
-}
-
-// SubmitTask submits a task for execution
-func (e *Executor) SubmitTask(taskID string) {
-	select {
-	case e.taskQueue <- taskID:
-		log.Printf("Task %s submitted to queue", taskID)
-	default:
-		log.Printf("Task queue full, cannot submit task %s", taskID)
-	}
-}
-
-// CancelTask cancels a running task
-func (e *Executor) CancelTask(taskID string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	cancel, exists := e.runningTasks[taskID]
-	if !exists {
-		return fmt.Errorf("task %s is not running", taskID)
-	}
-
-	cancel()
-	delete(e.runningTasks, taskID)
-
-	// Update task status
-	if err := e.taskRepo.UpdateStatus(taskID, models.TaskStatusCancelled); err != nil {
-		return fmt.Errorf("failed to update task status: %w", err)
-	}
-
-	log.Printf("Task %s cancelled", taskID)
-	return nil
-}
-
-// worker processes tasks from the queue
-func (e *Executor) worker(id int) {
-	defer e.wg.Done()
-	log.Printf("Worker %d started", id)
-
-	for {
-		select {
-		case <-e.stopChan:
-			log.Printf("Worker %d stopping", id)
-			return
-		case taskID := <-e.taskQueue:
-			log.Printf("Worker %d processing task %s", id, taskID)
-			if err := e.executeTask(taskID); err != nil {
-				log.Printf("Worker %d failed to execute task %s: %v", id, taskID, err)
-			}
-		}
-	}
-}
-
-// executeTask executes a single task
-func (e *Executor) executeTask(taskID string) error {
+// ExecuteTask executes a single task (exported for scheduler)
+func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 	// Get task
 	task, err := e.taskRepo.GetByID(taskID)
 	if err != nil {
@@ -175,21 +86,12 @@ func (e *Executor) executeTask(taskID string) error {
 		return fmt.Errorf("failed to parse workflow: %w", err)
 	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), e.taskTimeout)
-	defer cancel()
-
-	// Register running task
-	e.mu.Lock()
-	e.runningTasks[taskID] = cancel
-	e.mu.Unlock()
-
-	// Remove from running tasks when done
-	defer func() {
-		e.mu.Lock()
-		delete(e.runningTasks, taskID)
-		e.mu.Unlock()
-	}()
+	// Create context with timeout if not provided
+	if ctx == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), e.taskTimeout)
+		defer cancel()
+	}
 
 	// Create log file
 	logFilePath := filepath.Join(e.logDir, fmt.Sprintf("%s.log", taskID))
@@ -436,19 +338,4 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 func writeLog(w *bufio.Writer, message string) {
 	timestamp := time.Now().Format(time.RFC3339)
 	fmt.Fprintf(w, "[%s] %s\n", timestamp, message)
-}
-
-// ProcessPendingTasks fetches pending tasks and submits them
-func (e *Executor) ProcessPendingTasks() error {
-	tasks, err := e.taskRepo.GetPendingTasks(100)
-	if err != nil {
-		return fmt.Errorf("failed to get pending tasks: %w", err)
-	}
-
-	log.Printf("Found %d pending tasks", len(tasks))
-	for _, task := range tasks {
-		e.SubmitTask(task.ID)
-	}
-
-	return nil
 }

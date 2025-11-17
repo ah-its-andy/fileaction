@@ -33,6 +33,7 @@ polling:
 
 # Scheduler configuration
 scheduler:
-  enabled: false
-  # Cron expression for automatic scanning (optional)
-  # cron: "0 */6 * * *"  # Every 6 hours
+  # Maximum number of tasks that can run concurrently
+  max_running: 2
+  # Interval for scanning pending tasks
+  scan_interval: 2s

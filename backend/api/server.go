@@ -9,9 +9,8 @@ import (
 	"strconv"
 
 	"github.com/andi/fileaction/backend/database"
-	"github.com/andi/fileaction/backend/executor"
 	"github.com/andi/fileaction/backend/models"
-	"github.com/andi/fileaction/backend/scanner"
+	"github.com/andi/fileaction/backend/watcher"
 	"github.com/andi/fileaction/backend/workflow"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -19,17 +18,22 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
+// TaskCanceller defines the interface for cancelling tasks
+type TaskCanceller interface {
+	CancelTask(taskID string) error
+}
+
 // Server represents the HTTP API server
 type Server struct {
-	app      *fiber.App
-	db       *database.DB
-	executor *executor.Executor
-	scanner  *scanner.Scanner
-	logDir   string
+	app           *fiber.App
+	db            *database.DB
+	taskCanceller TaskCanceller
+	watcher       *watcher.Watcher
+	logDir        string
 }
 
 // New creates a new API server
-func New(db *database.DB, exec *executor.Executor, scan *scanner.Scanner, logDir string) *Server {
+func New(db *database.DB, taskCanceller TaskCanceller, watch *watcher.Watcher, logDir string) *Server {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: errorHandler,
 	})
@@ -60,11 +64,11 @@ func New(db *database.DB, exec *executor.Executor, scan *scanner.Scanner, logDir
 	}))
 
 	server := &Server{
-		app:      app,
-		db:       db,
-		executor: exec,
-		scanner:  scan,
-		logDir:   logDir,
+		app:           app,
+		db:            db,
+		taskCanceller: taskCanceller,
+		watcher:       watch,
+		logDir:        logDir,
 	}
 
 	server.setupRoutes()
@@ -249,6 +253,17 @@ func (s *Server) toggleWorkflow(c *fiber.Ctx) error {
 		return c.Status(500).JSON(ErrorResponse{Error: err.Error()})
 	}
 
+	// Enable or disable watcher
+	if wf.Enabled {
+		if err := s.watcher.EnableWorkflow(id); err != nil {
+			log.Printf("Warning: Failed to enable watcher for workflow %s: %v", id, err)
+		}
+	} else {
+		if err := s.watcher.DisableWorkflow(id); err != nil {
+			log.Printf("Warning: Failed to disable watcher for workflow %s: %v", id, err)
+		}
+	}
+
 	return c.JSON(wf)
 }
 
@@ -268,17 +283,13 @@ func (s *Server) scanWorkflow(c *fiber.Ctx) error {
 
 	// Run scan in background
 	go func() {
-		result, err := s.scanner.ScanWorkflow(id)
+		result, err := s.watcher.ScanWorkflow(id)
 		if err != nil {
 			log.Printf("Scan failed for workflow %s: %v", id, err)
 			return
 		}
 		log.Printf("Scan completed for workflow %s: %+v", id, result)
-
-		// Process pending tasks
-		if err := s.executor.ProcessPendingTasks(); err != nil {
-			log.Printf("Failed to process pending tasks: %v", err)
-		}
+		// Tasks will be picked up by scheduler automatically
 	}()
 
 	return c.JSON(SuccessResponse{Message: "Scan started"})
@@ -310,17 +321,13 @@ func (s *Server) clearWorkflowIndex(c *fiber.Ctx) error {
 
 	// Run scan in background
 	go func() {
-		result, err := s.scanner.ScanWorkflow(id)
+		result, err := s.watcher.ScanWorkflow(id)
 		if err != nil {
 			log.Printf("Scan failed for workflow %s: %v", id, err)
 			return
 		}
 		log.Printf("Scan completed for workflow %s: %+v", id, result)
-
-		// Process pending tasks
-		if err := s.executor.ProcessPendingTasks(); err != nil {
-			log.Printf("Failed to process pending tasks: %v", err)
-		}
+		// Tasks will be picked up by scheduler automatically
 	}()
 
 	return c.JSON(SuccessResponse{Message: "Index cleared and scan started"})
@@ -388,16 +395,14 @@ func (s *Server) retryTask(c *fiber.Ctx) error {
 		return c.Status(500).JSON(ErrorResponse{Error: err.Error()})
 	}
 
-	// Submit to executor
-	s.executor.SubmitTask(id)
-
-	return c.JSON(SuccessResponse{Message: "Task retry initiated"})
+	// Task will be picked up by scheduler automatically
+	return c.JSON(SuccessResponse{Message: "Task reset to pending, will be executed by scheduler"})
 }
 
 func (s *Server) cancelTask(c *fiber.Ctx) error {
 	id := c.Params("id")
 
-	if err := s.executor.CancelTask(id); err != nil {
+	if err := s.taskCanceller.CancelTask(id); err != nil {
 		return c.Status(400).JSON(ErrorResponse{Error: err.Error()})
 	}
 
