@@ -1,0 +1,18 @@
+name: convert-png-to-webp
+description: Convert PNG images to WebP format for better web performance
+on:
+  paths:
+    - ./images/png
+convert:
+  from: png
+  to: webp
+steps:
+  - name: convert-to-webp
+    run: cwebp -q 85 "${{ input_path }}" -o "${{ output_path }}"
+  - name: verify-output
+    run: test -f "${{ output_path }}"
+options:
+  concurrency: 4
+  include_subdirs: true
+  file_glob: "*.png"
+  skip_on_nochange: true

@@ -1,0 +1,18 @@
+name: markdown-to-pdf
+description: Convert Markdown documents to PDF using pandoc
+on:
+  paths:
+    - ./documents
+convert:
+  from: md
+  to: pdf
+steps:
+  - name: pandoc-convert
+    run: pandoc "${{ input_path }}" -o "${{ output_path }}" --pdf-engine=xelatex
+  - name: verify-pdf
+    run: file "${{ output_path }}" | grep -q "PDF"
+options:
+  concurrency: 2
+  include_subdirs: true
+  file_glob: "*.md"
+  skip_on_nochange: true

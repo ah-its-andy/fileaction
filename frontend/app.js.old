@@ -1,0 +1,680 @@
+// API Base URL
+const API_BASE = '/api';
+
+// State management
+const state = {
+    workflows: [],
+    tasks: [],
+    files: [],
+    currentView: 'workflows',
+    currentWorkflow: null,
+    currentTask: null,
+    tasksPage: 0,
+    tasksLimit: 50,
+    filesPage: 0,
+    filesLimit: 50,
+    logPollInterval: null,
+    tasksAutoRefresh: null,
+    tasksRefreshInterval: 3000, // 3 seconds
+};
+
+// Initialize app
+document.addEventListener('DOMContentLoaded', () => {
+    initializeRouting();
+    initializeEventListeners();
+    loadWorkflows();
+});
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+    stopTasksAutoRefresh();
+});
+
+// Routing
+function initializeRouting() {
+    const hash = window.location.hash.slice(1) || 'workflows';
+    navigateToView(hash);
+
+    window.addEventListener('hashchange', () => {
+        const newHash = window.location.hash.slice(1) || 'workflows';
+        navigateToView(newHash);
+    });
+}
+
+function navigateToView(viewName) {
+    // Stop tasks auto-refresh when leaving tasks view
+    if (state.currentView === 'tasks' && viewName !== 'tasks') {
+        stopTasksAutoRefresh();
+    }
+    
+    // Update nav items
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.view === viewName) {
+            item.classList.add('active');
+        }
+    });
+
+    // Update views
+    document.querySelectorAll('.view').forEach(view => {
+        view.classList.remove('active');
+    });
+    
+    const activeView = document.getElementById(`${viewName}-view`);
+    if (activeView) {
+        activeView.classList.add('active');
+        state.currentView = viewName;
+
+        // Load data for view
+        if (viewName === 'workflows') {
+            loadWorkflows();
+        } else if (viewName === 'tasks') {
+            loadTasks();
+            startTasksAutoRefresh();
+        } else if (viewName === 'files') {
+            populateWorkflowFilters();
+        }
+    }
+}
+
+// Event Listeners
+function initializeEventListeners() {
+    // Navigation
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const view = item.dataset.view;
+            window.location.hash = view;
+        });
+    });
+
+    // New workflow button
+    document.getElementById('new-workflow-btn').addEventListener('click', () => {
+        openWorkflowModal();
+    });
+
+    // Refresh buttons
+    document.getElementById('refresh-workflows-btn').addEventListener('click', loadWorkflows);
+    document.getElementById('refresh-tasks-btn').addEventListener('click', loadTasks);
+    document.getElementById('refresh-files-btn').addEventListener('click', loadFiles);
+
+    // Task filters
+    document.getElementById('task-status-filter').addEventListener('change', loadTasks);
+    document.getElementById('task-workflow-filter').addEventListener('change', loadTasks);
+
+    // File filter
+    document.getElementById('file-workflow-filter').addEventListener('change', loadFiles);
+
+    // Task pagination
+    document.getElementById('tasks-prev-btn').addEventListener('click', () => {
+        if (state.tasksPage > 0) {
+            state.tasksPage--;
+            loadTasks();
+        }
+    });
+    document.getElementById('tasks-next-btn').addEventListener('click', () => {
+        state.tasksPage++;
+        loadTasks();
+    });
+
+    // File pagination
+    document.getElementById('files-prev-btn').addEventListener('click', () => {
+        if (state.filesPage > 0) {
+            state.filesPage--;
+            loadFiles();
+        }
+    });
+    document.getElementById('files-next-btn').addEventListener('click', () => {
+        state.filesPage++;
+        loadFiles();
+    });
+
+    // Modal close
+    document.querySelectorAll('.modal-close, .modal-cancel').forEach(btn => {
+        btn.addEventListener('click', closeModals);
+    });
+
+    // Workflow form
+    document.getElementById('workflow-form').addEventListener('submit', handleWorkflowSubmit);
+}
+
+// API Functions
+async function apiRequest(endpoint, options = {}) {
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers,
+            },
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Request failed');
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
+        alert(`Error: ${error.message}`);
+        throw error;
+    }
+}
+
+// Workflows
+async function loadWorkflows() {
+    try {
+        const workflows = await apiRequest('/workflows');
+        state.workflows = workflows;
+        renderWorkflows(workflows);
+        populateWorkflowFilters();
+    } catch (error) {
+        console.error('Failed to load workflows:', error);
+    }
+}
+
+function renderWorkflows(workflows) {
+    const container = document.getElementById('workflows-list');
+    
+    if (workflows.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>No workflows yet</h3>
+                <p>Create your first workflow to get started</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = workflows.map(wf => `
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <div class="card-title">${escapeHtml(wf.name)}</div>
+                    <span class="status ${wf.enabled ? 'status-completed' : 'status-pending'}">
+                        ${wf.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                </div>
+                <div class="card-actions">
+                    <button class="btn ${wf.enabled ? 'btn-warning' : 'btn-success'} btn-small" onclick="toggleWorkflow('${wf.id}')">
+                        ${wf.enabled ? '⏸️ Disable' : '▶️ Enable'}
+                    </button>
+                    <button class="btn btn-success btn-small" onclick="scanWorkflow('${wf.id}')" ${!wf.enabled ? 'disabled' : ''}>
+                        🔍 Scan
+                    </button>
+                    <button class="btn btn-secondary btn-small" onclick="editWorkflow('${wf.id}')">
+                        ✏️ Edit
+                    </button>
+                    <button class="btn btn-danger btn-small" onclick="deleteWorkflow('${wf.id}', '${escapeHtml(wf.name)}')">
+                        🗑️ Delete
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                ${wf.description ? `<p>${escapeHtml(wf.description)}</p>` : ''}
+            </div>
+            <div class="card-meta">
+                <span>Created: ${formatDate(wf.created_at)}</span>
+                <span>Updated: ${formatDate(wf.updated_at)}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function scanWorkflow(id) {
+    try {
+        await apiRequest(`/workflows/${id}/scan`, { method: 'POST' });
+        alert('Scan started! Check the Tasks view for progress.');
+        if (state.currentView === 'tasks') {
+            loadTasks();
+        }
+    } catch (error) {
+        console.error('Failed to scan workflow:', error);
+    }
+}
+
+async function toggleWorkflow(id) {
+    try {
+        const workflow = await apiRequest(`/workflows/${id}/toggle`, { method: 'PUT' });
+        const action = workflow.enabled ? 'enabled' : 'disabled';
+        showNotification(`Workflow ${action} successfully`, 'success');
+        loadWorkflows();
+    } catch (error) {
+        console.error('Failed to toggle workflow:', error);
+        showNotification('Failed to toggle workflow', 'error');
+    }
+}
+
+async function deleteWorkflow(id, name) {
+    if (!confirm(`Are you sure you want to delete workflow "${name}"?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/workflows/${id}`, { method: 'DELETE' });
+        loadWorkflows();
+    } catch (error) {
+        console.error('Failed to delete workflow:', error);
+    }
+}
+
+function openWorkflowModal(workflow = null) {
+    const modal = document.getElementById('workflow-modal');
+    const title = document.getElementById('modal-title');
+    const form = document.getElementById('workflow-form');
+
+    if (workflow) {
+        title.textContent = 'Edit Workflow';
+        document.getElementById('workflow-name').value = workflow.name;
+        document.getElementById('workflow-description').value = workflow.description || '';
+        document.getElementById('workflow-yaml').value = workflow.yaml_content;
+        document.getElementById('workflow-enabled').checked = workflow.enabled;
+        form.dataset.workflowId = workflow.id;
+    } else {
+        title.textContent = 'New Workflow';
+        form.reset();
+        delete form.dataset.workflowId;
+        document.getElementById('workflow-yaml').value = getDefaultWorkflowYAML();
+    }
+
+    modal.classList.add('active');
+}
+
+async function editWorkflow(id) {
+    try {
+        const workflow = await apiRequest(`/workflows/${id}`);
+        openWorkflowModal(workflow);
+    } catch (error) {
+        console.error('Failed to load workflow:', error);
+    }
+}
+
+async function handleWorkflowSubmit(e) {
+    e.preventDefault();
+    
+    const form = e.target;
+    const workflowId = form.dataset.workflowId;
+    
+    const data = {
+        name: document.getElementById('workflow-name').value,
+        description: document.getElementById('workflow-description').value,
+        yaml_content: document.getElementById('workflow-yaml').value,
+        enabled: document.getElementById('workflow-enabled').checked,
+    };
+
+    try {
+        if (workflowId) {
+            await apiRequest(`/workflows/${workflowId}`, {
+                method: 'PUT',
+                body: JSON.stringify(data),
+            });
+        } else {
+            await apiRequest('/workflows', {
+                method: 'POST',
+                body: JSON.stringify(data),
+            });
+        }
+        
+        closeModals();
+        loadWorkflows();
+    } catch (error) {
+        console.error('Failed to save workflow:', error);
+    }
+}
+
+// Tasks
+async function loadTasks() {
+    try {
+        const status = document.getElementById('task-status-filter').value;
+        const workflowId = document.getElementById('task-workflow-filter').value;
+        const offset = state.tasksPage * state.tasksLimit;
+
+        let query = `?limit=${state.tasksLimit}&offset=${offset}`;
+        if (status) query += `&status=${status}`;
+        if (workflowId) query += `&workflow_id=${workflowId}`;
+
+        const response = await apiRequest(`/tasks${query}`);
+        state.tasks = response.tasks;
+        renderTasks(response.tasks, response.total);
+        
+        // Update last refresh time indicator
+        updateTasksRefreshIndicator();
+    } catch (error) {
+        console.error('Failed to load tasks:', error);
+    }
+}
+
+function startTasksAutoRefresh() {
+    // Clear any existing interval
+    stopTasksAutoRefresh();
+    
+    // Start new interval
+    state.tasksAutoRefresh = setInterval(() => {
+        loadTasks();
+    }, state.tasksRefreshInterval);
+    
+    console.log('Tasks auto-refresh started (interval: ' + state.tasksRefreshInterval + 'ms)');
+}
+
+function stopTasksAutoRefresh() {
+    if (state.tasksAutoRefresh) {
+        clearInterval(state.tasksAutoRefresh);
+        state.tasksAutoRefresh = null;
+        console.log('Tasks auto-refresh stopped');
+    }
+}
+
+function updateTasksRefreshIndicator() {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString();
+    console.log(`Tasks refreshed at ${timeStr}`);
+}
+
+function renderTasks(tasks, total) {
+    const container = document.getElementById('tasks-list');
+    
+    if (tasks.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>No tasks found</h3>
+                <p>Tasks will appear here after scanning workflows</p>
+            </div>
+        `;
+        updatePagination('tasks', 0, total);
+        return;
+    }
+
+    container.innerHTML = tasks.map(task => `
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <div class="card-title">${task.input_path.split('/').pop()}</div>
+                    <span class="status status-${task.status}">${task.status.toUpperCase()}</span>
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-secondary btn-small" onclick="viewTask('${task.id}')">
+                        👁️ View
+                    </button>
+                    ${task.status === 'failed' || task.status === 'cancelled' ? `
+                        <button class="btn btn-success btn-small" onclick="retryTask('${task.id}')">
+                            🔄 Retry
+                        </button>
+                    ` : ''}
+                    ${task.status === 'running' ? `
+                        <button class="btn btn-danger btn-small" onclick="cancelTask('${task.id}')">
+                            ❌ Cancel
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+            <div class="card-body">
+                <p><strong>Input:</strong> ${escapeHtml(task.input_path)}</p>
+                <p><strong>Output:</strong> ${escapeHtml(task.output_path)}</p>
+                ${task.error_message ? `<p class="status-failed"><strong>Error:</strong> ${escapeHtml(task.error_message)}</p>` : ''}
+            </div>
+            <div class="card-meta">
+                <span>Created: ${formatDate(task.created_at)}</span>
+                ${task.started_at ? `<span>Started: ${formatDate(task.started_at)}</span>` : ''}
+                ${task.completed_at ? `<span>Completed: ${formatDate(task.completed_at)}</span>` : ''}
+            </div>
+        </div>
+    `).join('');
+
+    updatePagination('tasks', tasks.length, total);
+}
+
+async function viewTask(id) {
+    try {
+        const task = await apiRequest(`/tasks/${id}`);
+        const steps = await apiRequest(`/tasks/${id}/steps`);
+        
+        const modal = document.getElementById('task-modal');
+        const detailsDiv = document.getElementById('task-details');
+        const stepsDiv = document.getElementById('task-steps');
+        const logsDiv = document.getElementById('task-logs');
+
+        detailsDiv.innerHTML = `
+            <p><strong>Status:</strong> <span class="status status-${task.status}">${task.status.toUpperCase()}</span></p>
+            <p><strong>Input:</strong> ${escapeHtml(task.input_path)}</p>
+            <p><strong>Output:</strong> ${escapeHtml(task.output_path)}</p>
+            ${task.error_message ? `<p><strong>Error:</strong> ${escapeHtml(task.error_message)}</p>` : ''}
+            <p><strong>Created:</strong> ${formatDate(task.created_at)}</p>
+            ${task.started_at ? `<p><strong>Started:</strong> ${formatDate(task.started_at)}</p>` : ''}
+            ${task.completed_at ? `<p><strong>Completed:</strong> ${formatDate(task.completed_at)}</p>` : ''}
+        `;
+
+        if (steps && steps.length > 0) {
+            stepsDiv.innerHTML = `
+                <h4>Steps</h4>
+                ${steps.map(step => `
+                    <div class="step-item">
+                        <div class="step-header">
+                            <span class="step-name">${escapeHtml(step.name)}</span>
+                            <span class="status status-${step.status}">${step.status.toUpperCase()}</span>
+                        </div>
+                        <p><code>${escapeHtml(step.command)}</code></p>
+                        ${step.exit_code !== null ? `<p>Exit Code: ${step.exit_code}</p>` : ''}
+                        ${step.stdout ? `<div class="step-output"><strong>STDOUT:</strong><br>${escapeHtml(step.stdout)}</div>` : ''}
+                        ${step.stderr ? `<div class="step-output"><strong>STDERR:</strong><br>${escapeHtml(step.stderr)}</div>` : ''}
+                    </div>
+                `).join('')}
+            `;
+        } else {
+            stepsDiv.innerHTML = '';
+        }
+
+        modal.classList.add('active');
+
+        // Start log polling if task is running
+        if (task.status === 'running') {
+            pollTaskLog(id, 0);
+        } else {
+            logsDiv.textContent = task.log_text || 'No logs available';
+        }
+    } catch (error) {
+        console.error('Failed to load task:', error);
+    }
+}
+
+async function pollTaskLog(taskId, offset) {
+    // Clear previous interval
+    if (state.logPollInterval) {
+        clearInterval(state.logPollInterval);
+    }
+
+    const logsDiv = document.getElementById('task-logs');
+    let currentOffset = offset;
+
+    const poll = async () => {
+        try {
+            const response = await apiRequest(`/tasks/${taskId}/log/tail?offset=${currentOffset}`);
+            
+            if (response.content) {
+                logsDiv.textContent += response.content;
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+            }
+            
+            currentOffset = response.offset;
+
+            if (response.completed) {
+                clearInterval(state.logPollInterval);
+                state.logPollInterval = null;
+            }
+        } catch (error) {
+            console.error('Failed to poll logs:', error);
+            clearInterval(state.logPollInterval);
+        }
+    };
+
+    // Poll immediately
+    poll();
+    
+    // Then poll every 2 seconds
+    state.logPollInterval = setInterval(poll, 2000);
+}
+
+async function retryTask(id) {
+    try {
+        await apiRequest(`/tasks/${id}/retry`, { method: 'POST' });
+        alert('Task retry initiated');
+        loadTasks();
+    } catch (error) {
+        console.error('Failed to retry task:', error);
+    }
+}
+
+async function cancelTask(id) {
+    try {
+        await apiRequest(`/tasks/${id}/cancel`, { method: 'POST' });
+        alert('Task cancelled');
+        loadTasks();
+    } catch (error) {
+        console.error('Failed to cancel task:', error);
+    }
+}
+
+// Files
+async function loadFiles() {
+    try {
+        const workflowId = document.getElementById('file-workflow-filter').value;
+        if (!workflowId) {
+            document.getElementById('files-list').innerHTML = `
+                <div class="empty-state">
+                    <h3>Select a workflow</h3>
+                    <p>Choose a workflow to view its indexed files</p>
+                </div>
+            `;
+            return;
+        }
+
+        const offset = state.filesPage * state.filesLimit;
+        const response = await apiRequest(`/files?workflow_id=${workflowId}&limit=${state.filesLimit}&offset=${offset}`);
+        state.files = response.files;
+        renderFiles(response.files, response.total);
+    } catch (error) {
+        console.error('Failed to load files:', error);
+    }
+}
+
+function renderFiles(files, total) {
+    const container = document.getElementById('files-list');
+    
+    if (files.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>No files found</h3>
+                <p>Scan the workflow to index files</p>
+            </div>
+        `;
+        updatePagination('files', 0, total);
+        return;
+    }
+
+    container.innerHTML = files.map(file => `
+        <div class="file-item">
+            <div class="file-path">${escapeHtml(file.file_path)}</div>
+            <div class="file-meta">
+                Size: ${formatBytes(file.file_size)} | 
+                MD5: ${file.file_md5} | 
+                Last scanned: ${formatDate(file.last_scanned_at)}
+            </div>
+        </div>
+    `).join('');
+
+    updatePagination('files', files.length, total);
+}
+
+// Helper functions
+function populateWorkflowFilters() {
+    const taskFilter = document.getElementById('task-workflow-filter');
+    const fileFilter = document.getElementById('file-workflow-filter');
+
+    const options = state.workflows.map(wf => 
+        `<option value="${wf.id}">${escapeHtml(wf.name)}</option>`
+    ).join('');
+
+    // Preserve current selection
+    const taskValue = taskFilter.value;
+    const fileValue = fileFilter.value;
+
+    taskFilter.innerHTML = '<option value="">All Workflows</option>' + options;
+    fileFilter.innerHTML = '<option value="">Select Workflow</option>' + options;
+
+    if (taskValue) taskFilter.value = taskValue;
+    if (fileValue) fileFilter.value = fileValue;
+}
+
+function updatePagination(type, count, total) {
+    const page = type === 'tasks' ? state.tasksPage : state.filesPage;
+    const limit = type === 'tasks' ? state.tasksLimit : state.filesLimit;
+    const offset = page * limit;
+
+    const pageInfo = document.getElementById(`${type}-page-info`);
+    const prevBtn = document.getElementById(`${type}-prev-btn`);
+    const nextBtn = document.getElementById(`${type}-next-btn`);
+
+    pageInfo.textContent = `Showing ${offset + 1}-${offset + count} of ${total}`;
+    prevBtn.disabled = page === 0;
+    nextBtn.disabled = offset + count >= total;
+}
+
+function closeModals() {
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.classList.remove('active');
+    });
+    
+    // Clear log polling
+    if (state.logPollInterval) {
+        clearInterval(state.logPollInterval);
+        state.logPollInterval = null;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleString();
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+function getDefaultWorkflowYAML() {
+    return `name: my-workflow
+description: Example workflow
+on:
+  paths:
+    - ./input
+convert:
+  from: jpg
+  to: png
+steps:
+  - name: convert-image
+    run: convert "$\{\{ input_path \}\}" "$\{\{ output_path \}\}"
+options:
+  concurrency: 2
+  include_subdirs: true
+  file_glob: "*.jpg"
+  skip_on_nochange: true`;
+}
+
+function showNotification(message, type = 'info') {
+    // Simple notification using alert for now
+    // Can be enhanced with a toast notification library later
+    if (type === 'error') {
+        alert('Error: ' + message);
+    } else {
+        alert(message);
+    }
+}

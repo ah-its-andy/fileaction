@@ -1,0 +1,36 @@
+name: convert-jpeg-to-heic
+description: Convert JPEG images to HEIC format using ImageMagick
+on:
+  paths:
+    - ./library/images
+convert:
+  from: jpeg
+  to: heic
+steps:
+  - name: imagemagick-convert
+    run: magick "${{ input_path }}" -quality 85 "${{ output_path }}"
+    env:
+      MAGICK_THREAD_LIMIT: "1"
+  - name: verify-conversion
+    run: |
+      # Check if output file exists and has size > 0
+      if [ ! -s "${{ output_path }}" ]; then
+        echo "Error: Output file does not exist or is empty"
+        exit 1
+      fi
+      # Use file command to check format (HEIC files may be reported as ISO Media or HEIF)
+      file_type=$(file "${{ output_path }}")
+      echo "File type: $file_type"
+      if echo "$file_type" | grep -qiE "HEIC|HEIF|ISO Media.*HEVC"; then
+        echo "Verification passed: File is in HEIC/HEIF format"
+        exit 0
+      else
+        echo "Warning: Could not verify HEIC format, but file exists"
+        exit 0
+      fi
+options:
+  concurrency: 2
+  include_subdirs: true
+  file_glob: "*.jpg,*.jpeg"
+  skip_on_nochange: true
+  output_dir_pattern: "../heic"

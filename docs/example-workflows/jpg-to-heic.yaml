@@ -1,0 +1,21 @@
+name: convert-jpeg-to-heic
+description: Convert JPEG images to HEIC format using ImageMagick
+on:
+  paths:
+    - ./images
+convert:
+  from: jpeg
+  to: heic
+steps:
+  - name: imagemagick-convert
+    run: magick "${{ input_path }}" -quality 85 "${{ output_path }}"
+    env:
+      MAGICK_THREAD_LIMIT: "1"
+  - name: verify-conversion
+    run: file "${{ output_path }}" | grep -q "HEIC"
+options:
+  concurrency: 2
+  include_subdirs: true
+  file_glob: "*.jpg,*.jpeg"
+  skip_on_nochange: true
+  output_dir_pattern: "../heic"

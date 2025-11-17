@@ -1,0 +1,665 @@
+/* Fluent Design System for FileAction */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Fluent Colors - Light Theme */
+    --bg-primary: #f3f3f3;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #fafafa;
+    --bg-hover: #f5f5f5;
+    --bg-active: #ebebeb;
+    
+    --border-color: #e1e1e1;
+    --divider-color: #ededed;
+    
+    --text-primary: #323130;
+    --text-secondary: #605e5c;
+    --text-tertiary: #8a8886;
+    --text-disabled: #a19f9d;
+    
+    --accent-blue: #0078d4;
+    --accent-blue-hover: #106ebe;
+    --accent-blue-active: #005a9e;
+    
+    --accent-green: #107c10;
+    --accent-green-hover: #0e700e;
+    
+    --accent-red: #d13438;
+    --accent-red-hover: #a82327;
+    
+    --accent-orange: #ca5010;
+    --accent-yellow: #fce100;
+    
+    /* Fluent Shadows */
+    --shadow-2: 0 1.6px 3.6px rgba(0,0,0,.13), 0 0.3px 0.9px rgba(0,0,0,.11);
+    --shadow-4: 0 3.2px 7.2px rgba(0,0,0,.13), 0 0.6px 1.8px rgba(0,0,0,.11);
+    --shadow-8: 0 6.4px 14.4px rgba(0,0,0,.13), 0 1.2px 3.6px rgba(0,0,0,.11);
+    --shadow-16: 0 12.8px 28.8px rgba(0,0,0,.13), 0 2.4px 7.2px rgba(0,0,0,.11);
+    
+    /* Fluent Border Radius */
+    --radius-small: 4px;
+    --radius-medium: 6px;
+    --radius-large: 8px;
+}
+
+body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.5;
+    font-size: 14px;
+    overflow: hidden;
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* Sidebar Styles */
+.sidebar {
+    width: 280px;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-2);
+}
+
+.sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--divider-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.sidebar-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.btn-new {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-small);
+    border: none;
+    background-color: var(--accent-blue);
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.btn-new:hover {
+    background-color: var(--accent-blue-hover);
+    transform: scale(1.05);
+}
+
+.btn-new:active {
+    background-color: var(--accent-blue-active);
+    transform: scale(0.95);
+}
+
+.workflow-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.workflow-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    margin-bottom: 2px;
+    border-radius: var(--radius-small);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.workflow-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.workflow-item.active {
+    background-color: var(--bg-active);
+    font-weight: 600;
+}
+
+.workflow-icon {
+    margin-right: 12px;
+    font-size: 16px;
+}
+
+.workflow-icon.enabled {
+    color: var(--accent-green);
+}
+
+.workflow-icon.disabled {
+    color: var(--text-disabled);
+}
+
+.workflow-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Main Content Area */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: var(--bg-primary);
+}
+
+.content-header {
+    padding: 24px 32px;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.workflow-status-icon {
+    font-size: 24px;
+}
+
+.workflow-status-icon.enabled {
+    color: var(--accent-green);
+}
+
+.workflow-status-icon.disabled {
+    color: var(--text-disabled);
+}
+
+.header-info h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.header-info p {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.content-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+}
+
+/* Task List */
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.task-card {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-medium);
+    padding: 16px;
+    transition: all 0.2s ease;
+}
+
+.task-card:hover {
+    box-shadow: var(--shadow-4);
+    transform: translateY(-1px);
+}
+
+.task-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.task-title {
+    font-weight: 600;
+    font-size: 14px;
+    word-break: break-all;
+}
+
+.task-status {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.task-status.pending {
+    background-color: #fff4ce;
+    color: #8a6d3b;
+}
+
+.task-status.running {
+    background-color: #cfe2ff;
+    color: #084298;
+}
+
+.task-status.completed {
+    background-color: #d1e7dd;
+    color: #0f5132;
+}
+
+.task-status.failed {
+    background-color: #f8d7da;
+    color: #842029;
+}
+
+.task-status.cancelled {
+    background-color: #e2e3e5;
+    color: #41464b;
+}
+
+.task-info {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.task-info-row {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 4px;
+}
+
+.task-info-row strong {
+    color: var(--text-primary);
+    min-width: 80px;
+}
+
+.task-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    margin-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.pagination-info {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pagination-pages {
+    font-size: 13px;
+    color: var(--text-primary);
+    padding: 0 8px;
+}
+
+.pagination-controls .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Buttons */
+.btn {
+    padding: 8px 16px;
+    border-radius: var(--radius-small);
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn-primary {
+    background-color: var(--accent-blue);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-blue-hover);
+}
+
+.btn-secondary {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--accent-blue);
+}
+
+.btn-success {
+    background-color: var(--accent-green);
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: var(--accent-green-hover);
+}
+
+.btn-warning {
+    background-color: var(--accent-orange);
+    color: white;
+}
+
+.btn-warning:hover {
+    background-color: #b44a0d;
+}
+
+.btn-danger {
+    background-color: var(--accent-red);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: var(--accent-red-hover);
+}
+
+.btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-large);
+    box-shadow: var(--shadow-16);
+    width: 90%;
+    max-width: 700px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    animation: modalSlideIn 0.2s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-30px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Right Slide Modal */
+.modal-slide-right {
+    justify-content: flex-end;
+    align-items: stretch;
+}
+
+.modal-slide-right .modal-content {
+    width: calc(100% - 280px); /* Full width minus sidebar */
+    max-width: none;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    animation: modalSlideInRight 0.3s ease-out;
+}
+
+@keyframes modalSlideInRight {
+    from {
+        transform: translateX(100%);
+    }
+    to {
+        transform: translateX(0);
+    }
+}
+
+.modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--divider-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.modal-close {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    border-radius: var(--radius-small);
+    transition: all 0.15s ease;
+}
+
+.modal-close:hover {
+    background-color: var(--bg-hover);
+}
+
+.modal-body {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Modal Body in Right Slide Modal */
+.modal-slide-right .modal-body {
+    padding: 0;
+    overflow: hidden;
+}
+
+/* Form Styles */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.form-input,
+.form-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-small);
+    font-size: 14px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 1px var(--accent-blue);
+}
+
+.form-textarea {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    resize: vertical;
+}
+
+.form-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.form-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.form-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 24px;
+}
+
+/* Log Viewer */
+.log-viewer {
+    background-color: #1e1e1e;
+    border-radius: var(--radius-small);
+    padding: 16px;
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    color: #d4d4d4;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Log Viewer in Right Slide Modal */
+.modal-slide-right .log-viewer {
+    max-height: none;
+    height: 100%;
+    border-radius: 0;
+}
+
+.log-line {
+    margin-bottom: 2px;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+}
+
+.empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.empty-state h3 {
+    font-size: 18px;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+/* Loading Spinner */
+.loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 6px;
+    border: 3px solid var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+}
