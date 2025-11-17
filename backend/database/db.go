@@ -146,7 +146,7 @@ func (db *DB) initDefaultWorkflows() error {
 		Name:        workflowData.Name,
 		Description: workflowData.Description,
 		YAMLContent: defaultWorkflowYAML,
-		Enabled:     true,
+		Enabled:     false, // Default workflow starts disabled
 	}
 
 	return db.conn.Create(workflow).Error
