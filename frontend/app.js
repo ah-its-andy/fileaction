@@ -86,7 +86,7 @@ function renderWorkflowList() {
         <div class="workflow-item ${workflow.id === state.currentWorkflowId ? 'active' : ''}" 
              onclick="selectWorkflow('${workflow.id}')">
             <span class="workflow-icon ${workflow.enabled ? 'enabled' : 'disabled'}">
-                ${workflow.enabled ? '✓' : '○'}
+                ${workflow.enabled ? '●' : '○'}
             </span>
             <span class="workflow-name">${escapeHtml(workflow.name)}</span>
         </div>
@@ -115,7 +115,7 @@ function renderWorkflowHeader(workflow) {
     header.innerHTML = `
         <div class="header-left">
             <span class="workflow-status-icon ${workflow.enabled ? 'enabled' : 'disabled'}">
-                ${workflow.enabled ? '✓' : '○'}
+                ${workflow.enabled ? '●' : '○'}
             </span>
             <div class="header-info">
                 <h1>${escapeHtml(workflow.name)}</h1>
@@ -181,19 +181,19 @@ function renderTaskStatusTabs() {
             </button>
             <button class="tab-button ${state.tasksStatus === 'pending' ? 'active' : ''}" 
                 onclick="switchTaskStatus('pending')">
-                <span class="tab-icon">⏳</span> Pending
+                <span class="tab-icon">○</span> Pending
             </button>
             <button class="tab-button ${state.tasksStatus === 'running' ? 'active' : ''}" 
                 onclick="switchTaskStatus('running')">
-                <span class="tab-icon">▶️</span> Running
+                <span class="tab-icon">▸</span> Running
             </button>
             <button class="tab-button ${state.tasksStatus === 'completed' ? 'active' : ''}" 
                 onclick="switchTaskStatus('completed')">
-                <span class="tab-icon">✅</span> Completed
+                <span class="tab-icon">●</span> Completed
             </button>
             <button class="tab-button ${state.tasksStatus === 'failed' ? 'active' : ''}" 
                 onclick="switchTaskStatus('failed')">
-                <span class="tab-icon">❌</span> Failed
+                <span class="tab-icon">✕</span> Failed
             </button>
         </div>
     `;
@@ -214,10 +214,8 @@ function switchTaskStatus(status) {
 function renderTaskList() {
     const container = document.getElementById('contentBody');
     
-    // Ensure tabs are rendered
-    if (!container.querySelector('.task-status-tabs')) {
-        renderTaskStatusTabs();
-    }
+    // Always render tabs to update active state
+    renderTaskStatusTabs();
     
     // Find or create task list container
     let taskListContainer = container.querySelector('.task-list-container');
@@ -280,16 +278,16 @@ function renderTaskCard(task) {
         <div class="task-card">
             <div class="task-header">
                 <div class="task-title">${escapeHtml(fileName)}</div>
-                <span class="task-status ${task.status}">${task.status.toUpperCase()}</span>
+                <span class="task-status ${task.status}">${task.status}</span>
             </div>
             <div class="task-info">
                 <div class="task-info-row">
                     <strong>Input:</strong>
-                    <span>${escapeHtml(task.input_path)}</span>
+                    <span title="${escapeHtml(task.input_path)}">${escapeHtml(task.input_path)}</span>
                 </div>
                 <div class="task-info-row">
                     <strong>Output:</strong>
-                    <span>${escapeHtml(task.output_path)}</span>
+                    <span title="${escapeHtml(task.output_path)}">${escapeHtml(task.output_path)}</span>
                 </div>
                 <div class="task-info-row">
                     <strong>Started:</strong>
@@ -300,24 +298,24 @@ function renderTaskCard(task) {
                     <span>${endTime}</span>
                 </div>
                 ${task.error_message ? `
-                <div class="task-info-row" style="color: var(--accent-red);">
+                <div class="task-info-row full-width" style="color: var(--accent-red);">
                     <strong>Error:</strong>
-                    <span>${escapeHtml(task.error_message)}</span>
+                    <span title="${escapeHtml(task.error_message)}">${escapeHtml(task.error_message)}</span>
                 </div>
                 ` : ''}
             </div>
             <div class="task-actions">
                 <button class="btn btn-secondary btn-small" onclick="viewTaskLog('${task.id}', '${task.status}')">
-                    📄 View Log
+                    View Log
                 </button>
                 ${task.status === 'failed' || task.status === 'cancelled' ? `
                 <button class="btn btn-success btn-small" onclick="retryTask('${task.id}')">
-                    🔄 Retry
+                    Retry
                 </button>
                 ` : ''}
                 ${task.status === 'running' ? `
                 <button class="btn btn-danger btn-small" onclick="cancelTask('${task.id}')">
-                    ❌ Cancel
+                    Cancel
                 </button>
                 ` : ''}
             </div>
