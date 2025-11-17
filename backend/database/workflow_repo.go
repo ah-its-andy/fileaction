@@ -1,9 +1,7 @@
 package database
 
 import (
-	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/andi/fileaction/backend/models"
 	"github.com/google/uuid"
@@ -24,152 +22,65 @@ func (r *WorkflowRepo) Create(workflow *models.Workflow) error {
 	if workflow.ID == "" {
 		workflow.ID = uuid.New().String()
 	}
-	now := time.Now()
-	workflow.CreatedAt = now
-	workflow.UpdatedAt = now
 
-	query := `
-		INSERT INTO workflows (id, name, description, yaml_content, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err := r.db.conn.Exec(query,
-		workflow.ID,
-		workflow.Name,
-		workflow.Description,
-		workflow.YAMLContent,
-		workflow.Enabled,
-		workflow.CreatedAt,
-		workflow.UpdatedAt,
-	)
-	return err
+	model := FromWorkflow(workflow)
+	if err := r.db.conn.Create(model).Error; err != nil {
+		return err
+	}
+
+	*workflow = *model.ToWorkflow()
+	return nil
 }
 
 // GetByID retrieves a workflow by ID
 func (r *WorkflowRepo) GetByID(id string) (*models.Workflow, error) {
-	query := `
-		SELECT id, name, description, yaml_content, enabled, created_at, updated_at
-		FROM workflows
-		WHERE id = ?
-	`
-	var workflow models.Workflow
-	err := r.db.conn.QueryRow(query, id).Scan(
-		&workflow.ID,
-		&workflow.Name,
-		&workflow.Description,
-		&workflow.YAMLContent,
-		&workflow.Enabled,
-		&workflow.CreatedAt,
-		&workflow.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	var model WorkflowModel
+	if err := r.db.conn.Where("id = ?", id).First(&model).Error; err != nil {
 		return nil, fmt.Errorf("workflow not found")
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &workflow, nil
+	return model.ToWorkflow(), nil
 }
 
 // GetByName retrieves a workflow by name
 func (r *WorkflowRepo) GetByName(name string) (*models.Workflow, error) {
-	query := `
-		SELECT id, name, description, yaml_content, enabled, created_at, updated_at
-		FROM workflows
-		WHERE name = ?
-	`
-	var workflow models.Workflow
-	err := r.db.conn.QueryRow(query, name).Scan(
-		&workflow.ID,
-		&workflow.Name,
-		&workflow.Description,
-		&workflow.YAMLContent,
-		&workflow.Enabled,
-		&workflow.CreatedAt,
-		&workflow.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	var model WorkflowModel
+	if err := r.db.conn.Where("name = ?", name).First(&model).Error; err != nil {
 		return nil, fmt.Errorf("workflow not found")
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &workflow, nil
+	return model.ToWorkflow(), nil
 }
 
 // List retrieves all workflows
 func (r *WorkflowRepo) List() ([]*models.Workflow, error) {
-	query := `
-		SELECT id, name, description, yaml_content, enabled, created_at, updated_at
-		FROM workflows
-		ORDER BY created_at DESC
-	`
-	rows, err := r.db.conn.Query(query)
-	if err != nil {
+	var modelList []WorkflowModel
+	if err := r.db.conn.Order("created_at DESC").Find(&modelList).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var workflows []*models.Workflow
-	for rows.Next() {
-		var workflow models.Workflow
-		err := rows.Scan(
-			&workflow.ID,
-			&workflow.Name,
-			&workflow.Description,
-			&workflow.YAMLContent,
-			&workflow.Enabled,
-			&workflow.CreatedAt,
-			&workflow.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		workflows = append(workflows, &workflow)
+	workflows := make([]*models.Workflow, len(modelList))
+	for i, model := range modelList {
+		workflows[i] = model.ToWorkflow()
 	}
-	return workflows, rows.Err()
+	return workflows, nil
 }
 
 // Update updates a workflow
 func (r *WorkflowRepo) Update(workflow *models.Workflow) error {
-	workflow.UpdatedAt = time.Now()
-	query := `
-		UPDATE workflows
-		SET name = ?, description = ?, yaml_content = ?, enabled = ?, updated_at = ?
-		WHERE id = ?
-	`
-	result, err := r.db.conn.Exec(query,
-		workflow.Name,
-		workflow.Description,
-		workflow.YAMLContent,
-		workflow.Enabled,
-		workflow.UpdatedAt,
-		workflow.ID,
-	)
-	if err != nil {
+	model := FromWorkflow(workflow)
+	if err := r.db.conn.Save(model).Error; err != nil {
 		return err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("workflow not found")
-	}
+	*workflow = *model.ToWorkflow()
 	return nil
 }
 
 // Delete deletes a workflow
 func (r *WorkflowRepo) Delete(id string) error {
-	query := `DELETE FROM workflows WHERE id = ?`
-	result, err := r.db.conn.Exec(query, id)
-	if err != nil {
-		return err
+	result := r.db.conn.Delete(&WorkflowModel{}, "id = ?", id)
+	if result.Error != nil {
+		return result.Error
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("workflow not found")
 	}
 	return nil

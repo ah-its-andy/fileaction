@@ -1,52 +1,91 @@
 package database
 
 import (
-	"database/sql"
 	_ "embed"
 	"fmt"
+	"strings"
+	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
 
 //go:embed default-workflow.yaml
 var defaultWorkflowYAML string
 
-// DB wraps the database connection
+// DB wraps the GORM database connection
 type DB struct {
-	conn *sql.DB
+	conn   *gorm.DB
+	dbType string // "mysql" or "sqlite"
 }
 
 // New creates a new database connection and initializes schema
 func New(dsn string) (*DB, error) {
-	// Use provided DSN or default
-	if dsn == "" {
-		dsn = "fileaction:fileaction_pass@tcp(localhost:3306)/fileaction?charset=utf8mb4&parseTime=True&loc=Local"
+	var gormDB *gorm.DB
+	var dbType string
+	var err error
+
+	// Configure GORM
+	config := &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now()
+		},
 	}
 
-	// Open database connection
-	conn, err := sql.Open("mysql", dsn)
+	// Detect database type and open connection
+	if dsn == "" || strings.HasSuffix(dsn, ".db") || strings.Contains(dsn, "file:") {
+		// SQLite with pure Go driver (modernc.org/sqlite)
+		if dsn == "" {
+			dsn = "./data/fileaction.db"
+		}
+		dbType = "sqlite"
+		// Use DriverName option to specify the pure Go SQLite driver
+		gormDB, err = gorm.Open(sqlite.Dialector{
+			DriverName: "sqlite",
+			DSN:        dsn,
+		}, config)
+	} else {
+		// MySQL
+		dbType = "mysql"
+		gormDB, err = gorm.Open(mysql.Open(dsn), config)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Test connection
-	if err := conn.Ping(); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+	// Get underlying SQL database for connection pool configuration
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get underlying database: %w", err)
 	}
 
-	db := &DB{conn: conn}
+	// Configure connection pool
+	if dbType == "sqlite" {
+		sqlDB.SetMaxOpenConns(1) // SQLite works best with single writer
+		sqlDB.SetMaxIdleConns(1)
+	} else {
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetMaxIdleConns(10)
+	}
+
+	db := &DB{
+		conn:   gormDB,
+		dbType: dbType,
+	}
 
 	// Initialize schema
 	if err := db.initSchema(); err != nil {
-		conn.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
 	// Initialize default workflows
 	if err := db.initDefaultWorkflows(); err != nil {
-		conn.Close()
 		return nil, fmt.Errorf("failed to initialize default workflows: %w", err)
 	}
 
@@ -55,87 +94,27 @@ func New(dsn string) (*DB, error) {
 
 // Close closes the database connection
 func (db *DB) Close() error {
-	return db.conn.Close()
+	sqlDB, err := db.conn.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
-// GetConn returns the underlying database connection
-func (db *DB) GetConn() *sql.DB {
+// GetConn returns the underlying GORM database connection
+func (db *DB) GetConn() *gorm.DB {
 	return db.conn
 }
 
-// initSchema creates all necessary tables
+// initSchema creates all necessary tables using GORM AutoMigrate
 func (db *DB) initSchema() error {
-	schemas := []string{
-		`CREATE TABLE IF NOT EXISTS workflows (
-			id VARCHAR(36) PRIMARY KEY,
-			name VARCHAR(255) NOT NULL UNIQUE,
-			description TEXT,
-			yaml_content TEXT NOT NULL,
-			enabled BOOLEAN DEFAULT true,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			INDEX idx_name (name),
-			INDEX idx_enabled (enabled)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-		`CREATE TABLE IF NOT EXISTS files (
-			id VARCHAR(36) PRIMARY KEY,
-			workflow_id VARCHAR(36) NOT NULL,
-			file_path VARCHAR(1024) NOT NULL,
-			file_md5 VARCHAR(32) NOT NULL,
-			file_size BIGINT NOT NULL,
-			last_scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			UNIQUE KEY unique_workflow_file (workflow_id, file_path(255)),
-			INDEX idx_workflow_id (workflow_id),
-			INDEX idx_file_md5 (file_md5)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-		`CREATE TABLE IF NOT EXISTS tasks (
-			id VARCHAR(36) PRIMARY KEY,
-			workflow_id VARCHAR(36) NOT NULL,
-			file_id VARCHAR(36) NOT NULL,
-			input_path VARCHAR(1024) NOT NULL,
-			output_path VARCHAR(1024),
-			status VARCHAR(20) NOT NULL DEFAULT 'pending',
-			log_text TEXT,
-			error_message TEXT,
-			started_at TIMESTAMP NULL,
-			completed_at TIMESTAMP NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			INDEX idx_workflow_id (workflow_id),
-			INDEX idx_file_id (file_id),
-			INDEX idx_status (status),
-			INDEX idx_created_at (created_at)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
-		`CREATE TABLE IF NOT EXISTS task_steps (
-			id VARCHAR(36) PRIMARY KEY,
-			task_id VARCHAR(36) NOT NULL,
-			name VARCHAR(255) NOT NULL,
-			command TEXT NOT NULL,
-			status VARCHAR(20) NOT NULL DEFAULT 'pending',
-			exit_code INT,
-			stdout TEXT,
-			stderr TEXT,
-			started_at TIMESTAMP NULL,
-			completed_at TIMESTAMP NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			INDEX idx_task_id (task_id),
-			INDEX idx_status (status)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-	}
-
-	for _, schema := range schemas {
-		if _, err := db.conn.Exec(schema); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	// AutoMigrate will create tables with appropriate types for each database
+	return db.conn.AutoMigrate(
+		&WorkflowModel{},
+		&FileModel{},
+		&TaskModel{},
+		&TaskStepModel{},
+	)
 }
 
 // initDefaultWorkflows creates default workflows if they don't exist
@@ -151,9 +130,8 @@ func (db *DB) initDefaultWorkflows() error {
 	}
 
 	// Check if workflow already exists
-	var count int
-	err := db.conn.QueryRow("SELECT COUNT(*) FROM workflows WHERE name = ?", workflowData.Name).Scan(&count)
-	if err != nil {
+	var count int64
+	if err := db.conn.Model(&WorkflowModel{}).Where("name = ?", workflowData.Name).Count(&count).Error; err != nil {
 		return err
 	}
 
@@ -163,14 +141,81 @@ func (db *DB) initDefaultWorkflows() error {
 	}
 
 	// Create default workflow
-	_, err = db.conn.Exec(
-		"INSERT INTO workflows (id, name, description, yaml_content, enabled) VALUES (?, ?, ?, ?, ?)",
-		"default-jpeg-to-heic",
-		workflowData.Name,
-		workflowData.Description,
-		defaultWorkflowYAML,
-		true,
-	)
+	workflow := &WorkflowModel{
+		ID:          "default-jpeg-to-heic",
+		Name:        workflowData.Name,
+		Description: workflowData.Description,
+		YAMLContent: defaultWorkflowYAML,
+		Enabled:     true,
+	}
 
-	return err
+	return db.conn.Create(workflow).Error
+}
+
+// GORM Models
+type WorkflowModel struct {
+	ID          string    `gorm:"primaryKey;type:varchar(36)"`
+	Name        string    `gorm:"uniqueIndex;type:varchar(255);not null"`
+	Description string    `gorm:"type:text"`
+	YAMLContent string    `gorm:"type:text;not null"`
+	Enabled     bool      `gorm:"default:true;index"`
+	CreatedAt   time.Time `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime"`
+}
+
+func (WorkflowModel) TableName() string {
+	return "workflows"
+}
+
+type FileModel struct {
+	ID            string    `gorm:"primaryKey;type:varchar(36)"`
+	WorkflowID    string    `gorm:"type:varchar(36);not null;index"`
+	FilePath      string    `gorm:"type:varchar(1024);not null"`
+	FileMD5       string    `gorm:"type:varchar(32);not null;index"`
+	FileSize      int64     `gorm:"not null"`
+	LastScannedAt time.Time `gorm:"autoCreateTime"`
+	CreatedAt     time.Time `gorm:"autoCreateTime"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime"`
+}
+
+func (FileModel) TableName() string {
+	return "files"
+}
+
+type TaskModel struct {
+	ID           string     `gorm:"primaryKey;type:varchar(36)"`
+	WorkflowID   string     `gorm:"type:varchar(36);not null;index"`
+	FileID       string     `gorm:"type:varchar(36);not null;index"`
+	InputPath    string     `gorm:"type:varchar(1024);not null"`
+	OutputPath   string     `gorm:"type:varchar(1024)"`
+	Status       string     `gorm:"type:varchar(20);not null;default:'pending';index"`
+	LogText      string     `gorm:"type:text"`
+	ErrorMessage string     `gorm:"type:text"`
+	StartedAt    *time.Time `gorm:"index"`
+	CompletedAt  *time.Time
+	CreatedAt    time.Time `gorm:"autoCreateTime;index"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
+}
+
+func (TaskModel) TableName() string {
+	return "tasks"
+}
+
+type TaskStepModel struct {
+	ID          string `gorm:"primaryKey;type:varchar(36)"`
+	TaskID      string `gorm:"type:varchar(36);not null;index"`
+	Name        string `gorm:"type:varchar(255);not null"`
+	Command     string `gorm:"type:text;not null"`
+	Status      string `gorm:"type:varchar(20);not null;default:'pending';index"`
+	ExitCode    *int   `gorm:"type:int"`
+	Stdout      string `gorm:"type:text"`
+	Stderr      string `gorm:"type:text"`
+	StartedAt   *time.Time
+	CompletedAt *time.Time
+	CreatedAt   time.Time `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime"`
+}
+
+func (TaskStepModel) TableName() string {
+	return "task_steps"
 }

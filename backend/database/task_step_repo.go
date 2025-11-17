@@ -2,7 +2,6 @@ package database
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/andi/fileaction/backend/models"
 	"github.com/google/uuid"
@@ -23,106 +22,48 @@ func (r *TaskStepRepo) Create(step *models.TaskStep) error {
 	if step.ID == "" {
 		step.ID = uuid.New().String()
 	}
-	now := time.Now()
-	step.CreatedAt = now
-	step.UpdatedAt = now
 
-	query := `
-		INSERT INTO task_steps (id, task_id, name, command, status, exit_code, stdout, stderr, started_at, completed_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
+	model := FromTaskStep(step)
+	if err := r.db.conn.Create(model).Error; err != nil {
+		return err
+	}
 
-	_, err := r.db.conn.Exec(query,
-		step.ID,
-		step.TaskID,
-		step.Name,
-		step.Command,
-		step.Status,
-		step.ExitCode,
-		step.Stdout,
-		step.Stderr,
-		step.StartedAt,
-		step.CompletedAt,
-		step.CreatedAt,
-		step.UpdatedAt,
-	)
-	return err
+	*step = *model.ToTaskStep()
+	return nil
 }
 
 // GetByTaskID retrieves all steps for a task
 func (r *TaskStepRepo) GetByTaskID(taskID string) ([]*models.TaskStep, error) {
-	query := `
-		SELECT id, task_id, name, command, status, exit_code, stdout, stderr, started_at, completed_at, created_at, updated_at
-		FROM task_steps
-		WHERE task_id = ?
-		ORDER BY created_at
-	`
-	rows, err := r.db.conn.Query(query, taskID)
+	var modelList []TaskStepModel
+	err := r.db.conn.Where("task_id = ?", taskID).
+		Order("created_at").
+		Find(&modelList).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var steps []*models.TaskStep
-	for rows.Next() {
-		var step models.TaskStep
-		err := rows.Scan(
-			&step.ID,
-			&step.TaskID,
-			&step.Name,
-			&step.Command,
-			&step.Status,
-			&step.ExitCode,
-			&step.Stdout,
-			&step.Stderr,
-			&step.StartedAt,
-			&step.CompletedAt,
-			&step.CreatedAt,
-			&step.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		steps = append(steps, &step)
+	steps := make([]*models.TaskStep, len(modelList))
+	for i, model := range modelList {
+		steps[i] = model.ToTaskStep()
 	}
-	return steps, rows.Err()
+	return steps, nil
 }
 
 // Update updates a task step
 func (r *TaskStepRepo) Update(step *models.TaskStep) error {
-	step.UpdatedAt = time.Now()
-	query := `
-		UPDATE task_steps
-		SET status = ?, exit_code = ?, stdout = ?, stderr = ?, started_at = ?, completed_at = ?, updated_at = ?
-		WHERE id = ?
-	`
-
-	result, err := r.db.conn.Exec(query,
-		step.Status,
-		step.ExitCode,
-		step.Stdout,
-		step.Stderr,
-		step.StartedAt,
-		step.CompletedAt,
-		step.UpdatedAt,
-		step.ID,
-	)
-	if err != nil {
-		return err
+	model := FromTaskStep(step)
+	result := r.db.conn.Save(model)
+	if result.Error != nil {
+		return result.Error
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("task step not found")
 	}
+	*step = *model.ToTaskStep()
 	return nil
 }
 
 // DeleteByTaskID deletes all steps for a task
 func (r *TaskStepRepo) DeleteByTaskID(taskID string) error {
-	query := `DELETE FROM task_steps WHERE task_id = ?`
-	_, err := r.db.conn.Exec(query, taskID)
-	return err
+	return r.db.conn.Delete(&TaskStepModel{}, "task_id = ?", taskID).Error
 }

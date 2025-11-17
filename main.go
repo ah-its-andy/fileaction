@@ -49,7 +49,9 @@ func main() {
 	log.Printf("Configuration: %+v", cfg)
 
 	// Initialize database
-	// cfg.Database.Path now should be MySQL DSN format: user:password@tcp(host:port)/dbname?params
+	// cfg.Database.Path supports both SQLite and MySQL:
+	// - SQLite: "./data/fileaction.db" or any path ending with .db
+	// - MySQL: "user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local"
 	db, err := database.New(cfg.Database.Path)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)

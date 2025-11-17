@@ -7,12 +7,12 @@ server:
 
 # Database configuration
 database:
-  # For SQLite (local development):
-  # path: "./data/fileaction.db"
+  # For SQLite (local development - default):
+  path: "./data/fileaction.db"
   
   # For MySQL (production):
   # Format: username:password@tcp(host:port)/database?charset=utf8mb4&parseTime=True&loc=Local
-  path: "fileaction:fileaction_pass@tcp(localhost:3306)/fileaction?charset=utf8mb4&parseTime=True&loc=Local"
+  # path: "fileaction:fileaction_pass@tcp(localhost:3306)/fileaction?charset=utf8mb4&parseTime=True&loc=Local"
 
 # Logging configuration
 logging:
