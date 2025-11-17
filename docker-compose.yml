@@ -1,45 +1,21 @@
 
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: fileaction-mysql
-    environment:
-      - MYSQL_ROOT_PASSWORD=fileaction_root_pass
-      - MYSQL_DATABASE=fileaction
-      - MYSQL_USER=fileaction
-      - MYSQL_PASSWORD=fileaction_pass
-      - TZ=UTC
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "3306:3306"
-    networks:
-      - fileaction-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pfileaction_root_pass"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
   fileaction:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: fileaction
-    depends_on:
-      mysql:
-        condition: service_healthy
     ports:
       - "8080:8080"
     volumes:
       # Mount directories for file processing
       - /Users/andi/source/github/fileaction_test:/app/library
+      # Persist SQLite database
+      - fileaction_data:/app/data
       # Persist logs
       - fileaction_logs:/app/data/logs
     environment:
-      - DB_PATH=fileaction:fileaction_pass@tcp(mysql:3306)/fileaction?charset=utf8mb4&parseTime=True&loc=Local
+      - DB_PATH=/app/data/fileaction.db
       - LOG_DIR=/app/data/logs
       - TZ=UTC
     restart: unless-stopped
@@ -57,15 +33,9 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-    networks:
-      - fileaction-network
 
 volumes:
-  mysql_data:
+  fileaction_data:
     driver: local
   fileaction_logs:
     driver: local
-
-networks:
-  fileaction-network:
-    driver: bridge
