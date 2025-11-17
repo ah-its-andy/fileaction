@@ -84,9 +84,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize file watcher: %v", err)
 	}
-	if err := watch.Start(); err != nil {
-		log.Fatalf("Failed to start file watcher: %v", err)
-	}
+	// Start file watcher asynchronously
+	go func() {
+		if err := watch.Start(); err != nil {
+			log.Printf("File watcher error: %v", err)
+		}
+	}()
 	defer watch.Stop()
 	log.Println("File watcher initialized and started")
 
@@ -125,6 +128,10 @@ func main() {
 		if err := server.Shutdown(); err != nil {
 			log.Printf("Error shutting down server: %v", err)
 		}
+
+		// Stop file watcher
+		log.Println("Stopping file watcher...")
+		watch.Stop()
 
 		// Stop scheduler (this will wait for running tasks to complete or timeout)
 		log.Println("Stopping scheduler...")
