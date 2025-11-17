@@ -73,6 +73,3 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ github.ref_name }}
-
-      - name: Image digest
-        run: echo ${{ steps.meta.outputs.tags }}
