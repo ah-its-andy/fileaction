@@ -28,8 +28,6 @@ RUN apk add --no-cache \
     imagemagick \
     imagemagick-heic \
     libwebp-tools \
-    pandoc \
-    texlive \
     file \
     ca-certificates \
     tzdata \
