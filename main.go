@@ -15,6 +15,7 @@ import (
 	"github.com/andi/fileaction/backend/database"
 	"github.com/andi/fileaction/backend/executor"
 	"github.com/andi/fileaction/backend/scanner"
+	"github.com/andi/fileaction/backend/watcher"
 )
 
 func main() {
@@ -76,6 +77,17 @@ func main() {
 	if err := exec.ProcessPendingTasks(); err != nil {
 		log.Printf("Warning: Failed to process pending tasks: %v", err)
 	}
+
+	// Initialize file watcher
+	watch, err := watcher.New(db, exec, scan)
+	if err != nil {
+		log.Fatalf("Failed to initialize file watcher: %v", err)
+	}
+	if err := watch.Start(); err != nil {
+		log.Fatalf("Failed to start file watcher: %v", err)
+	}
+	defer watch.Stop()
+	log.Println("File watcher initialized and started")
 
 	// Initialize API server
 	server := api.New(db, exec, scan, cfg.Logging.Dir)

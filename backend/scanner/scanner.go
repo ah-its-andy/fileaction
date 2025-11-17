@@ -218,6 +218,11 @@ func (s *Scanner) scanFile(workflowID, filePath string, workflowDef *workflow.Wo
 	return nil
 }
 
+// CalculateMD5 calculates the MD5 hash of a file (exported for watcher)
+func CalculateMD5(filePath string) (string, int64, error) {
+	return calculateMD5(filePath)
+}
+
 // calculateMD5 calculates the MD5 hash of a file
 func calculateMD5(filePath string) (string, int64, error) {
 	file, err := os.Open(filePath)
