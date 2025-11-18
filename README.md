@@ -1,136 +1,89 @@
 # FileAction
 
-FileAction is a lightweight workflow automation engine inspired by GitHub Actions, designed specifically for file format conversions and batch processing. It provides a simple YAML-based workflow definition, automatic file scanning with MD5-based change detection, and a clean web UI for monitoring tasks.
+A lightweight workflow automation engine inspired by GitHub Actions, designed for file format conversions and batch processing. Features YAML-based workflows, MD5-based smart file scanning, concurrent task execution, and a clean web UI for real-time monitoring.
 
-## Features
+## ✨ Features
 
-- **YAML-Based Workflows**: Define conversion workflows with simple YAML syntax
-- **Workflow Management**: Create, edit, delete, enable/disable workflows via web UI
-- **Automatic File Scanning**: Recursively scan directories and track file changes with MD5 hashing
-- **Smart Task Creation**: Only process new or modified files (skip_on_nochange)
-- **Concurrent Execution**: Configurable worker pools for parallel task processing
-- **Real-time Monitoring**: Web UI with live log streaming for running tasks
-- **Pure Go Backend**: No CGO dependencies, cross-platform compatible
-- **Single Binary Deployment**: Everything bundled in one executable
-- **SQLite Storage**: Embedded database using modernc.org/sqlite (no CGO)
-- **Default Workflow**: Pre-configured JPEG to HEIC conversion workflow included
+- **� YAML Workflows** - Define file processing pipelines with simple, readable syntax
+- **� Smart Scanning** - Automatic directory scanning with MD5 change detection
+- **⚡ Concurrent Execution** - Configurable worker pools for parallel processing
+- **📊 Real-time Monitoring** - Live task logs and status updates via Web UI
+- **🎯 Skip Unchanged Files** - Only process new or modified files to save resources
+- **🐳 Docker Ready** - One-command deployment with Docker Compose
+- **🚀 Single Binary** - Pure Go implementation, no CGO dependencies, cross-platform
+- **💾 Flexible Storage** - Supports both SQLite and MySQL databases
+- **🎨 Quick Start** - Pre-configured JPEG to HEIC workflow included
+- **🔄 Exit Control** - Special exit codes (100, 101) for workflow flow control
 
-## Architecture
+## 🚀 Quick Start
 
-### Backend (Go + Fiber)
-- **Fiber Framework**: High-performance HTTP server with middleware support
-- **SQLite Database**: Pure Go SQLite implementation for data persistence
-- **Workflow Engine**: YAML parser, variable substitution, and task scheduler
-- **File Scanner**: MD5-based change detection and file indexing
-- **Task Executor**: Worker pool with timeout control and log management
+## 🚀 Quick Start
 
-### Frontend (Vanilla JS SPA)
-- **Native JavaScript**: No frameworks, pure DOM manipulation
-- **Real-time Updates**: Polling-based log streaming for running tasks
-- **GitHub Actions Style**: Clean, familiar UI design
-- **Hash-based Routing**: Single-page navigation without page reloads
-
-## Quick Start
-
-### Prerequisites
-
-- Go 1.21 or higher
-- ImageMagick (for image conversion workflows)
-- Pandoc (optional, for document conversion)
-
-### Installation
+### Option 1: Docker (Recommended)
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fileaction.git
+git clone https://github.com/ah-its-andy/fileaction.git
 cd fileaction
 
-# Build the binary
+# Start with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f fileaction
+```
+
+### Option 2: Build from Source
+
+```bash
+# Prerequisites: Go 1.21+, ImageMagick (for image conversion)
+git clone https://github.com/ah-its-andy/fileaction.git
+cd fileaction
+
+# Build
 go mod download
 go build -o fileaction .
 
-# Run the server
+# Run
 ./fileaction
 ```
 
-The server will start on `http://localhost:8080` by default.
+Access the web interface at **http://localhost:8080**
 
-### Default Workflow
+### Try the Default Workflow
 
-FileAction comes with a pre-configured **JPEG to HEIC** conversion workflow that is automatically created on first run:
-
-- **Name**: `convert-jpeg-to-heic`
-- **Purpose**: Convert JPEG images to HEIC format for better compression
-- **Location**: Watches `./images` directory
-- **Features**: 
-  - Uses ImageMagick for conversion
-  - Quality set to 85
-  - Processes only new or changed files
-  - 2 concurrent workers
-
-To use the default workflow:
-1. Create an `./images` directory
-2. Add your JPEG files (`.jpg` extension)
-3. Open the web UI at `http://localhost:8080`
-4. Click "🔍 Scan" on the workflow
-5. Monitor task execution in the Tasks view
-
-### Using Docker
+FileAction includes a pre-configured JPEG to HEIC conversion workflow:
 
 ```bash
-# Build the Docker image
-docker build -t fileaction .
+# 1. Create the images directory
+mkdir -p ./images
 
-# Run with docker-compose
-docker-compose up -d
+# 2. Add some JPEG files
+cp your-photos/*.jpg ./images/
+
+# 3. Open http://localhost:8080 in your browser
+# 4. Click "🔍 Scan" on the "convert-jpeg-to-heic" workflow
+# 5. Go to "Tasks" to watch the conversion progress
 ```
 
-## Configuration
-
-Edit `config/config.yaml` to customize settings:
-
-```yaml
-server:
-  host: "0.0.0.0"
-  port: 8080
-
-database:
-  path: "./data/fileaction.db"
-
-logging:
-  dir: "./data/logs"
-
-execution:
-  default_concurrency: 4
-  max_concurrency: 16
-  task_timeout: 3600s
-  step_timeout: 1800s
-```
-
-Environment variables can override config values:
-- `CONFIG_PATH`: Path to config file
-- `DB_PATH`: Database file path
-- `LOG_DIR`: Log directory path
-
-## Workflow Definition
+## 📖 Workflow Definition
 
 ### Basic Structure
 
 ```yaml
 name: my-workflow
-description: Description of what this workflow does
+description: What this workflow does
 on:
   paths:
-    - ./input/path
-    - ./another/path
+    - ./input/directory
 convert:
   from: jpg
   to: png
 steps:
-  - name: step-name
-    run: command "${{ input_path }}" "${{ output_path }}"
+  - name: convert-image
+    run: convert "${{ input_path }}" "${{ output_path }}"
     env:
-      VAR_NAME: value
+      QUALITY: "85"
 options:
   concurrency: 4
   include_subdirs: true
@@ -140,16 +93,44 @@ options:
 
 ### Available Variables
 
-- `${{ input_path }}`: Full path to input file
-- `${{ output_path }}`: Full path to output file
-- `${{ file_name }}`: Filename with extension
-- `${{ file_dir }}`: Directory containing the file
-- `${{ file_base }}`: Filename without extension
-- `${{ file_ext }}`: File extension
+| Variable | Description |
+|----------|-------------|
+| `${{ input_path }}` | Full path to input file |
+| `${{ output_path }}` | Full path to output file |
+| `${{ file_name }}` | Filename with extension |
+| `${{ file_dir }}` | Directory containing the file |
+| `${{ file_base }}` | Filename without extension |
+| `${{ file_ext }}` | File extension |
 
-### Example Workflows
+### Exit Code Control
 
-#### JPEG to HEIC Conversion
+Use special exit codes to control workflow execution:
+
+| Exit Code | Meaning | Task Status | Continue? |
+|-----------|---------|-------------|-----------|
+| `0` | Success | Running | ✅ Next step |
+| `100` | Success & Stop | **Completed** | ❌ Stop workflow |
+| `101` | Failure & Stop | **Failed** | ❌ Stop workflow |
+| `1-99, 102+` | Step failed | Failed | ❌ Stop workflow |
+
+**Example: Skip already processed files**
+
+```yaml
+steps:
+  - name: check-if-processed
+    run: |
+      if [ -f "${{ output_path }}" ]; then
+        echo "File already processed, skipping"
+        exit 100  # Success & stop workflow
+      fi
+  
+  - name: process-file
+    run: convert "${{ input_path }}" "${{ output_path }}"
+```
+
+## 📚 Example Workflows
+
+### JPEG to HEIC
 
 ```yaml
 name: convert-jpeg-to-heic
@@ -164,27 +145,122 @@ steps:
     run: magick convert "${{ input_path }}" -quality 85 "${{ output_path }}"
     env:
       MAGICK_THREAD_LIMIT: "1"
-  - name: verify-conversion
-    run: file "${{ output_path }}" | grep -q "HEIC"
 options:
   concurrency: 2
-  include_subdirs: true
   file_glob: "*.jpg"
   skip_on_nochange: true
 ```
 
-More examples in `docs/example-workflows/`.
+### PNG to WebP
 
-## API Reference
+```yaml
+name: png-to-webp
+on:
+  paths:
+    - ./images/png
+convert:
+  from: png
+  to: webp
+steps:
+  - name: convert-to-webp
+    run: cwebp -q 85 "${{ input_path }}" -o "${{ output_path }}"
+options:
+  concurrency: 4
+  file_glob: "*.png"
+  skip_on_nochange: true
+```
+
+### Markdown to PDF
+
+```yaml
+name: markdown-to-pdf
+on:
+  paths:
+    - ./documents
+convert:
+  from: md
+  to: pdf
+steps:
+  - name: pandoc-convert
+    run: pandoc "${{ input_path }}" -o "${{ output_path }}" --pdf-engine=xelatex
+options:
+  concurrency: 2
+  file_glob: "*.md"
+  skip_on_nochange: true
+```
+
+More examples in [docs/example-workflows/](docs/example-workflows/)
+
+## 🏗️ Architecture
+
+### Backend (Go)
+- **Fiber Framework** - High-performance HTTP server
+- **Database** - SQLite (modernc.org/sqlite) or MySQL support
+- **Workflow Parser** - YAML parsing with variable substitution
+- **File Watcher** - MD5-based change detection and indexing
+- **Task Scheduler** - Worker pool with concurrent execution
+- **Log Management** - Real-time streaming and persistent storage
+
+### Frontend (Vanilla JS)
+- **No Framework** - Pure JavaScript, fast and lightweight
+- **Hash Routing** - SPA navigation without page reloads
+- **Real-time Updates** - Polling-based log streaming
+- **GitHub Actions Style** - Clean, familiar interface
+
+### Database Schema
+
+**Main Tables:**
+- `workflows` - Workflow definitions and settings
+- `files` - Indexed files with MD5 hashes
+- `tasks` - Conversion tasks with status tracking
+- `task_steps` - Individual step execution records
+
+## ⚙️ Configuration
+
+Edit `config/config.yaml`:
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  # SQLite
+  path: "./data/fileaction.db"
+  # MySQL (uncomment to use)
+  # path: "user:password@tcp(localhost:3306)/fileaction?charset=utf8mb4&parseTime=True"
+
+logging:
+  dir: "./data/logs"
+
+execution:
+  default_concurrency: 4
+  task_timeout: 3600s
+  step_timeout: 1800s
+```
+
+### Environment Variables
+
+Override config with environment variables:
+
+```bash
+CONFIG_PATH=/etc/fileaction/config.yaml ./fileaction
+DB_PATH=./custom/db.sqlite ./fileaction
+LOG_DIR=./custom/logs ./fileaction
+```
+
+## 🔌 API Reference
 
 ### Workflows
 
 - `GET /api/workflows` - List all workflows
-- `POST /api/workflows` - Create a new workflow
+- `POST /api/workflows` - Create workflow
 - `GET /api/workflows/:id` - Get workflow details
 - `PUT /api/workflows/:id` - Update workflow
 - `DELETE /api/workflows/:id` - Delete workflow
 - `POST /api/workflows/:id/scan` - Trigger scan
+- `POST /api/workflows/:id/enable` - Enable workflow
+- `POST /api/workflows/:id/disable` - Disable workflow
 
 ### Tasks
 
@@ -200,69 +276,84 @@ More examples in `docs/example-workflows/`.
 
 - `GET /api/files?workflow_id=:id` - List indexed files
 
-## Database Schema
+Full API documentation: [docs/API.md](docs/API.md)
 
-### workflows
-- `id`: UUID primary key
-- `name`: Unique workflow name
-- `description`: Optional description
-- `yaml_content`: YAML workflow definition
-- `enabled`: Boolean flag
-- `created_at`, `updated_at`: Timestamps
+## 🐳 Docker Deployment
 
-### files
-- `id`: UUID primary key
-- `workflow_id`: Foreign key to workflows
-- `file_path`: Absolute file path
-- `file_md5`: MD5 hash for change detection
-- `file_size`: File size in bytes
-- `last_scanned_at`: Last scan timestamp
+### Using Docker Compose (with MySQL)
 
-### tasks
-- `id`: UUID primary key
-- `workflow_id`: Foreign key to workflows
-- `file_id`: Foreign key to files
-- `input_path`, `output_path`: File paths
-- `status`: pending, running, completed, failed, cancelled
-- `log_text`: Full execution log (after completion)
-- `error_message`: Error details if failed
-- `started_at`, `completed_at`: Timestamps
+```yaml
+version: '3.8'
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: fileaction
+      MYSQL_USER: fileaction
+      MYSQL_PASSWORD: fileaction_pass
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-### task_steps
-- `id`: UUID primary key
-- `task_id`: Foreign key to tasks
-- `name`: Step name from workflow
-- `command`: Executed command
-- `status`: Step status
-- `exit_code`: Command exit code
-- `stdout`, `stderr`: Command output
+  fileaction:
+    image: fileaction:latest
+    ports:
+      - "8080:8080"
+    environment:
+      DB_PATH: "fileaction:fileaction_pass@tcp(mysql:3306)/fileaction?charset=utf8mb4&parseTime=True"
+    volumes:
+      - ./data/logs:/app/data/logs
+      - ./images:/app/images
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
 
-## Development
+volumes:
+  mysql_data:
+```
+
+### Standalone Docker
+
+```bash
+docker build -t fileaction .
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/images:/app/images \
+  fileaction
+```
+
+## 🛠️ Development
 
 ### Project Structure
 
 ```
 fileaction/
 ├── backend/
-│   ├── api/          # HTTP server and handlers
-│   ├── config/       # Configuration loading
-│   ├── database/     # Database layer and repositories
-│   ├── executor/     # Task execution engine
-│   ├── models/       # Data models
-│   ├── scanner/      # File scanning logic
-│   └── workflow/     # Workflow parser
+│   ├── api/              # HTTP server and handlers
+│   ├── config/           # Configuration management
+│   ├── database/         # Database layer & repositories
+│   ├── models/           # Data models
+│   ├── scheduler/        # Task scheduler & executor pool
+│   ├── watcher/          # File watcher & scanner
+│   └── workflow/         # YAML parser
 ├── frontend/
-│   ├── index.html    # SPA entry point
-│   ├── style.css     # Styling
-│   └── app.js        # Frontend logic
+│   ├── index.html        # SPA entry point
+│   ├── style.css         # Styling
+│   └── app.js            # Frontend logic
 ├── config/
-│   └── config.yaml   # Default configuration
-├── docs/
-│   └── example-workflows/  # Example YAML files
-├── main.go           # Application entry point
-├── go.mod            # Go dependencies
-├── Dockerfile        # Docker build
-└── docker-compose.yml # Docker compose config
+│   └── config.yaml       # Default configuration
+├── docs/                 # Documentation
+├── main.go               # Application entry
+├── Makefile              # Build automation
+├── Dockerfile            # Docker image
+└── docker-compose.yml    # Docker Compose config
 ```
 
 ### Running Tests
@@ -274,7 +365,7 @@ go test ./...
 # Run with coverage
 go test -cover ./...
 
-# Run specific package tests
+# Run specific package
 go test ./backend/workflow/
 ```
 
@@ -282,94 +373,104 @@ go test ./backend/workflow/
 
 ```bash
 # Build for current platform
-go build -o fileaction .
+make build
 
-# Build for Linux (from macOS)
+# Cross-compile for Linux
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o fileaction-linux .
 
-# Build with embedded frontend
-go build -tags embed -o fileaction .
+# Cross-compile for Windows
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o fileaction.exe .
 ```
 
-## Deployment
+## 🔧 Troubleshooting
 
-### Standalone Binary
+### Tasks Not Executing
 
-```bash
-# Copy binary and config
-./fileaction
+Check logs: `tail -f data/logs/app.log`
+- Verify workflow is enabled
+- Check executor concurrency settings
+- Ensure no resource constraints
 
-# Or specify config path
-CONFIG_PATH=/etc/fileaction/config.yaml ./fileaction
-```
+### Database Locked (SQLite)
 
-### Docker
+- Only one instance should run with SQLite
+- Consider using MySQL for multi-instance deployment
+- Check for file permission issues
 
-```bash
-# Using docker-compose (recommended)
-docker-compose up -d
+### ImageMagick Not Found
 
-# Or using Docker directly
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/images:/app/images \
-  fileaction
-```
-
-### systemd Service
-
-Create `/etc/systemd/system/fileaction.service`:
-
-```ini
-[Unit]
-Description=FileAction Workflow Engine
-After=network.target
-
-[Service]
-Type=simple
-User=fileaction
-WorkingDirectory=/opt/fileaction
-ExecStart=/opt/fileaction/fileaction
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## Troubleshooting
-
-### Database locked errors
-- Ensure only one instance is running
-- Check file permissions on database file
-- WAL mode is enabled by default for better concurrency
-
-### Tasks stuck in "running" state
-- Check executor logs in `data/logs/app.log`
-- Verify task timeout settings
-- Use task cancel endpoint to force stop
-
-### ImageMagick not found
 ```bash
 # macOS
 brew install imagemagick
 
 # Ubuntu/Debian
-apt-get install imagemagick
+sudo apt-get install imagemagick
 
 # Alpine (Docker)
 apk add imagemagick imagemagick-heic
 ```
 
-## License
+### Files Not Detected
 
-MIT License - see LICENSE file for details.
+- Verify `file_glob` pattern matches your files
+- Check `on.paths` points to correct directory
+- Enable `include_subdirs` for nested directories
+- Review `ignore` patterns if set
 
-## Contributing
+## 📊 Performance Tips
+
+- **Concurrency**: Adjust based on CPU cores (default: 4)
+- **File Glob**: Use specific patterns to limit scope
+- **Skip Unchanged**: Enable `skip_on_nochange` to avoid redundant work
+- **Database**: Use MySQL for better concurrency in production
+- **Timeouts**: Tune `task_timeout` and `step_timeout` for your workload
+
+## 🔒 Security Considerations
+
+- **Shell Execution**: Commands run with application privileges
+- **Authentication**: No built-in auth, use reverse proxy for production
+- **File Access**: Workflows can access any file the user can read
+- **Input Validation**: YAML and file paths are validated
+- **CORS**: Enabled by default, restrict origins in production
+
+## 🗺️ Roadmap
+
+- [ ] WebSocket support for real-time updates
+- [ ] Scheduled workflow execution (cron)
+- [ ] Workflow templates marketplace
+- [ ] Batch operations support
+- [ ] Built-in authentication & authorization
+- [ ] Metrics and monitoring dashboard
+- [ ] Plugin system for custom steps
+- [ ] Multi-node cluster support
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## Acknowledgments
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📖 Documentation
+
+- [Quick Start Guide](docs/QUICKSTART.md)
+- [API Documentation](docs/API.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Workflow Exit Control](docs/WORKFLOW_EXIT_CONTROL.md)
+- [MySQL Migration Guide](MYSQL_MIGRATION.md)
+- [Example Workflows](docs/example-workflows/)
+
+## 🙏 Acknowledgments
 
 Inspired by GitHub Actions' workflow syntax and execution model.
+
+---
+
+**Built with ❤️ using Go and Vanilla JavaScript**

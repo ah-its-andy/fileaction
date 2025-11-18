@@ -43,6 +43,7 @@ type Server struct {
 	scheduler Scheduler
 	watcher   *watcher.Watcher
 	logDir    string
+	wsHub     *WebSocketHub
 }
 
 // New creates a new API server
@@ -86,6 +87,7 @@ func New(db *database.DB, scheduler Scheduler, watch *watcher.Watcher, logDir st
 		scheduler: scheduler,
 		watcher:   watch,
 		logDir:    logDir,
+		wsHub:     NewWebSocketHub(),
 	}
 
 	server.setupRoutes()
@@ -125,6 +127,9 @@ func (s *Server) setupRoutes() {
 	// Files
 	api.Get("/files", s.listFiles)
 
+	// WebSocket for real-time logs
+	api.Get("/ws/logs", s.HandleWebSocket)
+
 	// Scheduler/Monitoring
 	api.Get("/scheduler/stats", s.getSchedulerStats)
 	api.Get("/scheduler/executors", s.getExecutorStatus)
@@ -138,7 +143,13 @@ func (s *Server) Start(addr string) error {
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown() error {
+	s.wsHub.Stop()
 	return s.app.Shutdown()
+}
+
+// GetWebSocketHub returns the WebSocket hub instance
+func (s *Server) GetWebSocketHub() *WebSocketHub {
+	return s.wsHub
 }
 
 // Error response

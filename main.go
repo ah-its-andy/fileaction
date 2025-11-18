@@ -84,6 +84,9 @@ func main() {
 	server := api.New(db, sched, watch, cfg.Logging.Dir)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
+	// Connect scheduler to WebSocket hub for real-time log broadcasting
+	sched.SetWebSocketHub(server.GetWebSocketHub())
+
 	// Setup graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)

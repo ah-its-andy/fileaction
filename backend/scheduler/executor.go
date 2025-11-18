@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/andi/fileaction/backend/database"
@@ -68,6 +69,8 @@ type Executor struct {
 	stepTimeout  time.Duration
 	busy         bool
 	currentTask  string
+	wsHub        WebSocketHub
+	wsHubMu      sync.RWMutex
 }
 
 // newExecutor creates a new executor instance
@@ -97,6 +100,31 @@ func (e *Executor) GetID() int {
 // GetCurrentTask returns the ID of the current task being executed
 func (e *Executor) GetCurrentTask() string {
 	return e.currentTask
+}
+
+// SetWebSocketHub sets the WebSocket hub for real-time log broadcasting
+func (e *Executor) SetWebSocketHub(hub WebSocketHub) {
+	e.wsHubMu.Lock()
+	defer e.wsHubMu.Unlock()
+	e.wsHub = hub
+}
+
+// broadcastLog sends log content to WebSocket clients if hub is available
+func (e *Executor) broadcastLog(taskID, content string) {
+	e.wsHubMu.RLock()
+	defer e.wsHubMu.RUnlock()
+	if e.wsHub != nil {
+		e.wsHub.BroadcastLog(taskID, content)
+	}
+}
+
+// broadcastTaskComplete notifies WebSocket clients that task is complete
+func (e *Executor) broadcastTaskComplete(taskID string) {
+	e.wsHubMu.RLock()
+	defer e.wsHubMu.RUnlock()
+	if e.wsHub != nil {
+		e.wsHub.BroadcastTaskComplete(taskID)
+	}
 }
 
 // ExecuteTask executes a single task with detailed logging
@@ -292,6 +320,9 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("failed to update task: %w", err)
 	}
 
+	// Broadcast task completion to WebSocket clients
+	e.broadcastTaskComplete(taskID)
+
 	// Remove log file after importing to database
 	if err := os.Remove(logFilePath); err != nil {
 		log.Printf("[Executor-%d] Failed to remove log file: %v", e.id, err)
@@ -450,11 +481,14 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 }
 
 // writeLog writes a timestamped log entry to both the writer and execution record
+// and broadcasts it via WebSocket if available
 func (e *Executor) writeLog(w *bufio.Writer, record *ExecutionRecord, message string) {
 	timestamp := time.Now().Format(time.RFC3339)
-	logEntry := fmt.Sprintf("[%s] %s", timestamp, message)
-	fmt.Fprintln(w, logEntry)
+	logEntry := fmt.Sprintf("[%s] %s\n", timestamp, message)
+	fmt.Fprint(w, logEntry)
 	if record != nil {
 		record.LogEntries = append(record.LogEntries, logEntry)
+		// Broadcast to WebSocket clients
+		e.broadcastLog(record.TaskID, logEntry)
 	}
 }

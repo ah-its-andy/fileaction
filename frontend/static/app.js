@@ -13,7 +13,7 @@ const state = {
     tasksPageSize: 20,
     tasksStatus: 'all', // 'all', 'running', 'pending', 'completed', 'failed'
     tasksAutoRefresh: null,
-    logAutoRefresh: null,
+    logWebSocket: null, // WebSocket connection for real-time logs
     currentTaskId: null,
     editingWorkflowId: null,
     currentTab: 'workflows', // 'workflows' or 'monitoring'
@@ -438,11 +438,94 @@ async function viewTaskLog(taskId, taskStatus) {
     contentEl.innerHTML = '<div class="loading"></div> Loading log...';
     modal.classList.add('active');
     
-    // Start polling for running tasks
+    // Use WebSocket for running tasks, HTTP for completed tasks
     if (taskStatus === 'running') {
-        startLogAutoRefresh(taskId);
+        connectWebSocket(taskId);
     } else {
         await loadTaskLog(taskId);
+    }
+}
+
+function connectWebSocket(taskId) {
+    // Close existing WebSocket if any
+    if (state.logWebSocket) {
+        state.logWebSocket.close();
+        state.logWebSocket = null;
+    }
+
+    const contentEl = document.getElementById('logContent');
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/logs`;
+    
+    try {
+        const ws = new WebSocket(wsUrl);
+        state.logWebSocket = ws;
+        
+        ws.onopen = () => {
+            console.log('WebSocket connected for task:', taskId);
+            contentEl.textContent = ''; // Clear loading message
+            
+            // Send subscribe message
+            ws.send(JSON.stringify({
+                action: 'subscribe',
+                task_id: taskId
+            }));
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                console.log('WebSocket message:', message.type);
+                
+                if (message.type === 'subscribed') {
+                    console.log('Subscribed to task:', message.task_id);
+                } else if (message.type === 'log') {
+                    // Append new log content
+                    contentEl.textContent += message.content;
+                    // Auto-scroll to bottom
+                    contentEl.scrollTop = contentEl.scrollHeight;
+                } else if (message.type === 'complete') {
+                    // Task completed
+                    console.log('Task completed');
+                    // Refresh task list to show updated status
+                    setTimeout(() => loadTasks(state.currentWorkflowId), 500);
+                } else if (message.type === 'close') {
+                    // Server closing connection
+                    console.log('Server closing WebSocket');
+                    ws.close();
+                } else if (message.type === 'pong') {
+                    // Ping response
+                }
+            } catch (error) {
+                console.error('Failed to parse WebSocket message:', error);
+            }
+        };
+        
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            contentEl.textContent = 'WebSocket connection error. Falling back to HTTP polling...';
+            // Fallback to HTTP polling
+            setTimeout(() => loadTaskLog(taskId), 1000);
+        };
+        
+        ws.onclose = () => {
+            console.log('WebSocket closed');
+            state.logWebSocket = null;
+        };
+        
+        // Send ping every 20 seconds to keep connection alive
+        const pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'ping' }));
+            } else {
+                clearInterval(pingInterval);
+            }
+        }, 20000);
+        
+    } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+        // Fallback to HTTP polling
+        loadTaskLog(taskId);
     }
 }
 
@@ -505,18 +588,6 @@ function stopTasksAutoRefresh() {
     if (state.tasksAutoRefresh) {
         clearInterval(state.tasksAutoRefresh);
         state.tasksAutoRefresh = null;
-    }
-}
-
-function startLogAutoRefresh(taskId) {
-    stopLogAutoRefresh();
-    loadTaskLog(taskId);
-}
-
-function stopLogAutoRefresh() {
-    if (state.logAutoRefresh) {
-        clearInterval(state.logAutoRefresh);
-        state.logAutoRefresh = null;
     }
 }
 
@@ -599,7 +670,11 @@ function closeModal(modalId) {
     modal.classList.remove('active');
     
     if (modalId === 'logModal') {
-        stopLogAutoRefresh();
+        // Close WebSocket if open
+        if (state.logWebSocket) {
+            state.logWebSocket.close();
+            state.logWebSocket = null;
+        }
         state.currentTaskId = null;
     }
 }

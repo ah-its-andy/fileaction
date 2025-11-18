@@ -20,6 +20,8 @@ type ExecutorPool struct {
 	stepTimeout time.Duration
 	mu          sync.Mutex
 	closed      bool
+	wsHub       WebSocketHub
+	wsHubMu     sync.RWMutex
 }
 
 // NewExecutorPool creates a new executor pool
@@ -78,6 +80,19 @@ func (p *ExecutorPool) Release(executor *Executor) {
 
 	log.Printf("Executor-%d released back to pool", executor.GetID())
 	p.available <- executor
+}
+
+// SetWebSocketHub sets the WebSocket hub for all executors
+func (p *ExecutorPool) SetWebSocketHub(hub WebSocketHub) {
+	p.wsHubMu.Lock()
+	defer p.wsHubMu.Unlock()
+	p.wsHub = hub
+
+	// Set WebSocket hub for all executors
+	for _, executor := range p.executors {
+		executor.SetWebSocketHub(hub)
+	}
+	log.Println("WebSocket hub set for executor pool")
 }
 
 // GetPoolSize returns the total number of executors in the pool

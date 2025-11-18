@@ -11,6 +11,12 @@ import (
 	"github.com/andi/fileaction/backend/models"
 )
 
+// WebSocketHub interface for broadcasting logs
+type WebSocketHub interface {
+	BroadcastLog(taskID, content string)
+	BroadcastTaskComplete(taskID string)
+}
+
 // Scheduler handles task scheduling and execution
 type Scheduler struct {
 	taskRepo     *database.TaskRepo
@@ -23,6 +29,8 @@ type Scheduler struct {
 	mu           sync.Mutex
 	stopped      bool
 	runningTasks map[string]context.CancelFunc
+	wsHub        WebSocketHub
+	wsHubMu      sync.RWMutex
 }
 
 // New creates a new scheduler
@@ -85,6 +93,15 @@ func (s *Scheduler) Stop() {
 	s.executorPool.Close()
 
 	log.Println("Scheduler stopped")
+}
+
+// SetWebSocketHub sets the WebSocket hub for real-time log broadcasting
+func (s *Scheduler) SetWebSocketHub(hub WebSocketHub) {
+	s.wsHubMu.Lock()
+	defer s.wsHubMu.Unlock()
+	s.wsHub = hub
+	s.executorPool.SetWebSocketHub(hub)
+	log.Println("WebSocket hub connected to scheduler")
 }
 
 // run is the main scheduler loop
