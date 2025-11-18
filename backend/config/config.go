@@ -87,9 +87,6 @@ func Load(path string) (*Config, error) {
 	if cfg.Polling.Interval == 0 {
 		cfg.Polling.Interval = 2 * time.Second
 	}
-	if cfg.Scheduler.MaxRunning == 0 {
-		cfg.Scheduler.MaxRunning = 2
-	}
 	if cfg.Scheduler.ScanInterval == 0 {
 		cfg.Scheduler.ScanInterval = 2 * time.Second
 	}
@@ -114,7 +111,7 @@ func LoadFromEnv(path string) (*Config, error) {
 	}
 	if maxRunning := os.Getenv("MAX_RUNNING"); maxRunning != "" {
 		if val, err := strconv.Atoi(maxRunning); err == nil && val > 0 {
-			cfg.Scheduler.MaxRunning = val
+			cfg.Execution.DefaultConcurrency = val
 		}
 	}
 
