@@ -79,23 +79,13 @@ func (w *Watcher) Start() error {
 		return err
 	}
 
-	// Scan and watch each enabled workflow
+	// Add file system watches first (non-blocking)
 	for _, wf := range workflows {
 		if !wf.Enabled {
 			continue
 		}
 
-		// Perform initial scan
-		log.Printf("Performing initial scan for workflow: %s", wf.Name)
-		result, err := w.scanWorkflow(wf.ID)
-		if err != nil {
-			log.Printf("Warning: Failed to scan workflow %s: %v", wf.Name, err)
-		} else {
-			log.Printf("Scan completed for workflow %s: scanned=%d, new=%d, changed=%d, skipped=%d, tasks=%d",
-				wf.Name, result.FilesScanned, result.FilesNew, result.FilesChanged, result.FilesSkipped, result.TasksCreated)
-		}
-
-		// Add file system watches
+		// Add file system watches (fast)
 		if err := w.addWorkflowWatch(wf); err != nil {
 			log.Printf("Warning: Failed to add watch for workflow %s: %v", wf.Name, err)
 		}
@@ -106,6 +96,26 @@ func (w *Watcher) Start() error {
 	go w.processEvents()
 
 	log.Printf("File watcher started, monitoring %d workflow(s)", len(w.watchedPaths))
+
+	// Perform initial scans asynchronously (non-blocking)
+	go func() {
+		for _, wf := range workflows {
+			if !wf.Enabled {
+				continue
+			}
+
+			log.Printf("Performing initial scan for workflow: %s", wf.Name)
+			result, err := w.scanWorkflow(wf.ID)
+			if err != nil {
+				log.Printf("Warning: Failed to scan workflow %s: %v", wf.Name, err)
+			} else {
+				log.Printf("Scan completed for workflow %s: scanned=%d, new=%d, changed=%d, skipped=%d, tasks=%d",
+					wf.Name, result.FilesScanned, result.FilesNew, result.FilesChanged, result.FilesSkipped, result.TasksCreated)
+			}
+		}
+		log.Println("All initial workflow scans completed")
+	}()
+
 	return nil
 }
 
