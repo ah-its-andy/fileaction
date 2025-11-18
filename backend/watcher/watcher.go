@@ -262,6 +262,12 @@ func (w *Watcher) findWorkflowsForPath(path string) []*models.Workflow {
 					continue
 				}
 
+				// Check if file is in ignore list
+				if workflow.MatchesIgnorePattern(path, workflowDef.Options.Ignore) {
+					log.Printf("File %s matches ignore pattern, skipping", path)
+					break
+				}
+
 				if workflow.MatchesFileGlob(path, workflowDef.Options.FileGlob) {
 					result = append(result, wf)
 				}
@@ -281,6 +287,12 @@ func (w *Watcher) processFile(wf *models.Workflow, filePath string) {
 	workflowDef, err := workflow.Parse(wf.YAMLContent)
 	if err != nil {
 		log.Printf("Error parsing workflow %s: %v", wf.Name, err)
+		return
+	}
+
+	// Check if file matches ignore patterns
+	if workflow.MatchesIgnorePattern(filePath, workflowDef.Options.Ignore) {
+		log.Printf("File %s matches ignore pattern, skipping", filePath)
 		return
 	}
 
@@ -502,6 +514,13 @@ func (w *Watcher) scanPath(workflowID, scanPath string, workflowDef *workflow.Wo
 // scanFile processes a single file during scan
 func (w *Watcher) scanFile(workflowID, filePath string, workflowDef *workflow.WorkflowDef, result *ScanResult) error {
 	result.FilesScanned++
+
+	// Check if file matches ignore patterns
+	if workflow.MatchesIgnorePattern(filePath, workflowDef.Options.Ignore) {
+		log.Printf("File %s matches ignore pattern, skipping", filePath)
+		result.FilesSkipped++
+		return nil
+	}
 
 	// Double-check if file matches glob pattern before processing
 	if !workflow.MatchesFileGlob(filePath, workflowDef.Options.FileGlob) {

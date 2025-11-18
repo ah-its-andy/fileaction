@@ -1,0 +1,35 @@
+<!-- Workflow Editor Modal -->
+<div class="modal" id="workflowModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title" id="modalTitle">New Workflow</h3>
+            <button class="modal-close" onclick="closeModal('workflowModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="workflowForm">
+                <div class="form-group">
+                    <label class="form-label" for="workflowName">Name</label>
+                    <input type="text" class="form-input" id="workflowName" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="workflowDescription">Description</label>
+                    <input type="text" class="form-input" id="workflowDescription">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="workflowYaml">YAML Configuration</label>
+                    <textarea class="form-textarea" id="workflowYaml" rows="15" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="workflowEnabled" checked>
+                        <span>Enabled</span>
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('workflowModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

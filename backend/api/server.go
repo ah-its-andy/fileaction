@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/template/html/v2"
 )
 
 // TaskCanceller defines the interface for cancelling tasks
@@ -23,18 +24,34 @@ type TaskCanceller interface {
 	CancelTask(taskID string) error
 }
 
+// SchedulerStats defines the interface for getting scheduler statistics
+type SchedulerStats interface {
+	GetExecutorPoolStats() map[string]int
+	GetExecutorStatus() interface{}
+}
+
+// Scheduler combines both interfaces
+type Scheduler interface {
+	TaskCanceller
+	SchedulerStats
+}
+
 // Server represents the HTTP API server
 type Server struct {
-	app           *fiber.App
-	db            *database.DB
-	taskCanceller TaskCanceller
-	watcher       *watcher.Watcher
-	logDir        string
+	app       *fiber.App
+	db        *database.DB
+	scheduler Scheduler
+	watcher   *watcher.Watcher
+	logDir    string
 }
 
 // New creates a new API server
-func New(db *database.DB, taskCanceller TaskCanceller, watch *watcher.Watcher, logDir string) *Server {
+func New(db *database.DB, scheduler Scheduler, watch *watcher.Watcher, logDir string) *Server {
+	// Initialize HTML template engine
+	engine := html.New("./frontend/templates", ".html")
+
 	app := fiber.New(fiber.Config{
+		Views:        engine,
 		ErrorHandler: errorHandler,
 	})
 
@@ -64,11 +81,11 @@ func New(db *database.DB, taskCanceller TaskCanceller, watch *watcher.Watcher, l
 	}))
 
 	server := &Server{
-		app:           app,
-		db:            db,
-		taskCanceller: taskCanceller,
-		watcher:       watch,
-		logDir:        logDir,
+		app:       app,
+		db:        db,
+		scheduler: scheduler,
+		watcher:   watch,
+		logDir:    logDir,
 	}
 
 	server.setupRoutes()
@@ -77,6 +94,12 @@ func New(db *database.DB, taskCanceller TaskCanceller, watch *watcher.Watcher, l
 
 // setupRoutes sets up all API routes
 func (s *Server) setupRoutes() {
+	// Home page with server-side rendering
+	s.app.Get("/", s.renderIndex)
+
+	// Static files
+	s.app.Static("/static", "./frontend/static")
+
 	// API routes
 	api := s.app.Group("/api")
 
@@ -102,10 +125,9 @@ func (s *Server) setupRoutes() {
 	// Files
 	api.Get("/files", s.listFiles)
 
-	// Static files (frontend)
-	s.app.Static("/", "./frontend", fiber.Static{
-		Index: "index.html",
-	})
+	// Scheduler/Monitoring
+	api.Get("/scheduler/stats", s.getSchedulerStats)
+	api.Get("/scheduler/executors", s.getExecutorStatus)
 }
 
 // Start starts the HTTP server
@@ -139,7 +161,15 @@ func errorHandler(c *fiber.Ctx, err error) error {
 	return c.Status(code).JSON(ErrorResponse{Error: err.Error()})
 }
 
-// Workflow handlers
+// ============== Page Rendering ==============
+
+func (s *Server) renderIndex(c *fiber.Ctx) error {
+	return c.Render("index", fiber.Map{
+		"Title": "FileAction - Workflow Automation",
+	})
+}
+
+// ============== Workflow Handlers ==============
 
 func (s *Server) listWorkflows(c *fiber.Ctx) error {
 	repo := database.NewWorkflowRepo(s.db)
@@ -402,7 +432,7 @@ func (s *Server) retryTask(c *fiber.Ctx) error {
 func (s *Server) cancelTask(c *fiber.Ctx) error {
 	id := c.Params("id")
 
-	if err := s.taskCanceller.CancelTask(id); err != nil {
+	if err := s.scheduler.CancelTask(id); err != nil {
 		return c.Status(400).JSON(ErrorResponse{Error: err.Error()})
 	}
 
@@ -515,4 +545,16 @@ func (s *Server) listFiles(c *fiber.Ctx) error {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+// Scheduler/Monitoring handlers
+
+func (s *Server) getSchedulerStats(c *fiber.Ctx) error {
+	stats := s.scheduler.GetExecutorPoolStats()
+	return c.JSON(stats)
+}
+
+func (s *Server) getExecutorStatus(c *fiber.Ctx) error {
+	status := s.scheduler.GetExecutorStatus()
+	return c.JSON(status)
 }

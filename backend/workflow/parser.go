@@ -40,11 +40,12 @@ type Step struct {
 
 // Options represents workflow execution options
 type Options struct {
-	Concurrency      int    `yaml:"concurrency"`
-	IncludeSubdirs   bool   `yaml:"include_subdirs"`
-	FileGlob         string `yaml:"file_glob"`
-	SkipOnNoChange   bool   `yaml:"skip_on_nochange"`
-	OutputDirPattern string `yaml:"output_dir_pattern"`
+	Concurrency      int      `yaml:"concurrency"`
+	IncludeSubdirs   bool     `yaml:"include_subdirs"`
+	FileGlob         string   `yaml:"file_glob"`
+	SkipOnNoChange   bool     `yaml:"skip_on_nochange"`
+	OutputDirPattern string   `yaml:"output_dir_pattern"`
+	Ignore           []string `yaml:"ignore"`
 }
 
 // Variables available for substitution
@@ -157,6 +158,75 @@ func MatchesFileGlob(filePath, globPattern string) bool {
 		}
 		if matched {
 			return true
+		}
+	}
+
+	return false
+}
+
+// MatchesIgnorePattern checks if a file path matches any of the ignore patterns
+// Supports:
+// - Glob patterns for filenames (e.g., "*.tmp", "*.log")
+// - Directory names (e.g., ".git", "node_modules")
+// - File names (e.g., ".DS_Store", "Thumbs.db")
+// - Path patterns (e.g., "**/temp/**", "**/.git/**")
+func MatchesIgnorePattern(filePath string, ignorePatterns []string) bool {
+	if len(ignorePatterns) == 0 {
+		return false
+	}
+
+	// Get filename and directory components
+	fileName := filepath.Base(filePath)
+	dirPath := filepath.Dir(filePath)
+
+	for _, pattern := range ignorePatterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
+		// Check if it's a path pattern with wildcards
+		if strings.Contains(pattern, "**") || strings.Contains(pattern, string(filepath.Separator)) {
+			// Handle path patterns like "**/temp/**" or "temp/**"
+			matched, err := filepath.Match(pattern, filePath)
+			if err == nil && matched {
+				return true
+			}
+
+			// Also try matching against the full path with forward slashes (for cross-platform compatibility)
+			normalizedPath := filepath.ToSlash(filePath)
+			normalizedPattern := filepath.ToSlash(pattern)
+			matched, err = filepath.Match(normalizedPattern, normalizedPath)
+			if err == nil && matched {
+				return true
+			}
+
+			// Check if any directory in the path matches the pattern
+			if strings.Contains(pattern, "**") {
+				patternParts := strings.Split(strings.Trim(pattern, "**/"), "/")
+				for _, part := range patternParts {
+					if part == "" {
+						continue
+					}
+					if strings.Contains(dirPath, part) || strings.Contains(filePath, part) {
+						return true
+					}
+				}
+			}
+		} else {
+			// Simple pattern - check against filename
+			matched, err := filepath.Match(pattern, fileName)
+			if err == nil && matched {
+				return true
+			}
+
+			// Check if pattern matches any directory component
+			pathParts := strings.Split(filePath, string(filepath.Separator))
+			for _, part := range pathParts {
+				if part == pattern {
+					return true
+				}
+			}
 		}
 	}
 

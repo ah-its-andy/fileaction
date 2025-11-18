@@ -19,3 +19,9 @@ options:
   file_glob: "*.jpg,*.jpeg"
   skip_on_nochange: true
   output_dir_pattern: "../heic"
+  ignore:
+    - ".DS_Store"      # Ignore macOS metadata files
+    - "Thumbs.db"      # Ignore Windows thumbnail cache
+    - "*.tmp"          # Ignore temporary files
+    - "**/drafts/**"   # Ignore files in any 'drafts' directory
+

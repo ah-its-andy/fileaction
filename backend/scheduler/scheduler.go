@@ -3,18 +3,19 @@ package scheduler
 import (
 	"context"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/andi/fileaction/backend/database"
-	"github.com/andi/fileaction/backend/executor"
 	"github.com/andi/fileaction/backend/models"
 )
 
 // Scheduler handles task scheduling and execution
 type Scheduler struct {
 	taskRepo     *database.TaskRepo
-	executor     *executor.Executor
+	executorPool *ExecutorPool
+	db           *database.DB
 	maxRunning   int
 	scanInterval time.Duration
 	stopChan     chan struct{}
@@ -22,21 +23,35 @@ type Scheduler struct {
 	mu           sync.Mutex
 	stopped      bool
 	runningTasks map[string]context.CancelFunc
-	runningCount int
 }
 
 // New creates a new scheduler
-func New(db *database.DB, exec *executor.Executor, maxRunning int, scanInterval time.Duration) *Scheduler {
+func New(db *database.DB, maxRunning int, scanInterval time.Duration, logDir string, taskTimeout, stepTimeout time.Duration) *Scheduler {
 	if maxRunning <= 0 {
 		maxRunning = 2 // Default maximum running tasks
 	}
 	if scanInterval <= 0 {
 		scanInterval = 2 * time.Second // Default scan interval
 	}
+	if taskTimeout <= 0 {
+		taskTimeout = 30 * time.Minute // Default task timeout
+	}
+	if stepTimeout <= 0 {
+		stepTimeout = 10 * time.Minute // Default step timeout
+	}
+
+	// Create log directory if it doesn't exist
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Printf("Failed to create log directory: %v", err)
+	}
+
+	// Create executor pool
+	executorPool := NewExecutorPool(maxRunning, db, logDir, taskTimeout, stepTimeout)
 
 	return &Scheduler{
 		taskRepo:     database.NewTaskRepo(db),
-		executor:     exec,
+		executorPool: executorPool,
+		db:           db,
 		maxRunning:   maxRunning,
 		scanInterval: scanInterval,
 		stopChan:     make(chan struct{}),
@@ -65,6 +80,10 @@ func (s *Scheduler) Stop() {
 	log.Println("Stopping scheduler...")
 	close(s.stopChan)
 	s.wg.Wait()
+
+	// Close the executor pool
+	s.executorPool.Close()
+
 	log.Println("Scheduler stopped")
 }
 
@@ -90,21 +109,19 @@ func (s *Scheduler) run() {
 
 // scanAndExecute scans for pending tasks and executes them if possible
 func (s *Scheduler) scanAndExecute() {
-	s.mu.Lock()
-	availableSlots := s.maxRunning - s.runningCount
-	currentRunning := s.runningCount
-	s.mu.Unlock()
+	availableExecutors := s.executorPool.GetAvailableCount()
+	busyExecutors := s.executorPool.GetBusyCount()
 
-	log.Printf("Scheduler scan: running=%d, max=%d, available=%d", currentRunning, s.maxRunning, availableSlots)
+	log.Printf("Scheduler scan: busy=%d, available=%d, max=%d", busyExecutors, availableExecutors, s.maxRunning)
 
-	if availableSlots <= 0 {
-		// No available slots, wait for running tasks to complete
-		log.Println("No available slots, skipping scan")
+	if availableExecutors <= 0 {
+		// No available executors, wait for one to become free
+		log.Println("No available executors, skipping scan")
 		return
 	}
 
 	// Get pending tasks
-	tasks, err := s.taskRepo.GetPendingTasks(availableSlots)
+	tasks, err := s.taskRepo.GetPendingTasks(availableExecutors)
 	if err != nil {
 		log.Printf("Error getting pending tasks: %v", err)
 		return
@@ -115,18 +132,10 @@ func (s *Scheduler) scanAndExecute() {
 		return
 	}
 
-	log.Printf("Found %d pending task(s), %d slot(s) available", len(tasks), availableSlots)
+	log.Printf("Found %d pending task(s), %d executor(s) available", len(tasks), availableExecutors)
 
 	// Execute tasks
 	for _, task := range tasks {
-		s.mu.Lock()
-		if s.runningCount >= s.maxRunning {
-			s.mu.Unlock()
-			break
-		}
-		s.runningCount++
-		s.mu.Unlock()
-
 		s.executeTask(task)
 	}
 }
@@ -136,24 +145,37 @@ func (s *Scheduler) executeTask(task *models.Task) {
 	s.wg.Add(1)
 	go func(taskID string) {
 		defer s.wg.Done()
-		defer func() {
-			s.mu.Lock()
-			s.runningCount--
-			delete(s.runningTasks, taskID)
-			s.mu.Unlock()
-		}()
 
 		log.Printf("Starting task execution: %s", taskID)
 
 		// Create cancellable context for the task
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		s.mu.Lock()
 		s.runningTasks[taskID] = cancel
 		s.mu.Unlock()
 
+		// Acquire an executor from the pool
+		executor, err := s.executorPool.Acquire(ctx)
+		if err != nil {
+			log.Printf("Failed to acquire executor for task %s: %v", taskID, err)
+			s.mu.Lock()
+			delete(s.runningTasks, taskID)
+			s.mu.Unlock()
+			return
+		}
+
+		// Ensure executor is released back to pool when done
+		defer s.executorPool.Release(executor)
+		defer func() {
+			s.mu.Lock()
+			delete(s.runningTasks, taskID)
+			s.mu.Unlock()
+		}()
+
 		// Execute the task
-		if err := s.executor.ExecuteTask(ctx, taskID); err != nil {
+		if err := executor.ExecuteTask(ctx, taskID); err != nil {
 			log.Printf("Error executing task %s: %v", taskID, err)
 		} else {
 			log.Printf("Task execution completed: %s", taskID)
@@ -187,12 +209,24 @@ func (s *Scheduler) CancelTask(taskID string) error {
 
 // GetRunningCount returns the current number of running tasks
 func (s *Scheduler) GetRunningCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.runningCount
+	return s.executorPool.GetBusyCount()
 }
 
 // GetMaxRunning returns the maximum number of concurrent tasks
 func (s *Scheduler) GetMaxRunning() int {
 	return s.maxRunning
+}
+
+// GetExecutorStatus returns the status of all executors in the pool
+func (s *Scheduler) GetExecutorStatus() interface{} {
+	return s.executorPool.GetExecutorStatus()
+}
+
+// GetExecutorPoolStats returns statistics about the executor pool
+func (s *Scheduler) GetExecutorPoolStats() map[string]int {
+	return map[string]int{
+		"total":     s.executorPool.GetPoolSize(),
+		"available": s.executorPool.GetAvailableCount(),
+		"busy":      s.executorPool.GetBusyCount(),
+	}
 }

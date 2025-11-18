@@ -1,4 +1,4 @@
-package executor
+package scheduler
 
 import (
 	"bufio"
@@ -34,34 +34,80 @@ func (e *WorkflowStopFailure) Error() string {
 	return e.Message
 }
 
-// Executor handles task execution
+// ExecutionRecord stores detailed execution information
+type ExecutionRecord struct {
+	TaskID      string
+	StartTime   time.Time
+	EndTime     time.Time
+	Environment map[string]string
+	Steps       []StepRecord
+	LogEntries  []string
+}
+
+// StepRecord stores information about a step execution
+type StepRecord struct {
+	Name        string
+	Command     string
+	Environment map[string]string
+	StartTime   time.Time
+	EndTime     time.Time
+	ExitCode    int
+	Stdout      string
+	Stderr      string
+	LogEntries  []string
+}
+
+// Executor handles task execution with detailed logging
 type Executor struct {
+	id           int
 	taskRepo     *database.TaskRepo
 	stepRepo     *database.TaskStepRepo
 	workflowRepo *database.WorkflowRepo
 	logDir       string
 	taskTimeout  time.Duration
 	stepTimeout  time.Duration
+	busy         bool
+	currentTask  string
 }
 
-// New creates a new executor
-func New(db *database.DB, logDir string, taskTimeout, stepTimeout time.Duration) *Executor {
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		log.Printf("Failed to create log directory: %v", err)
-	}
-
+// newExecutor creates a new executor instance
+func newExecutor(id int, db *database.DB, logDir string, taskTimeout, stepTimeout time.Duration) *Executor {
 	return &Executor{
+		id:           id,
 		taskRepo:     database.NewTaskRepo(db),
 		stepRepo:     database.NewTaskStepRepo(db),
 		workflowRepo: database.NewWorkflowRepo(db),
 		logDir:       logDir,
 		taskTimeout:  taskTimeout,
 		stepTimeout:  stepTimeout,
+		busy:         false,
 	}
 }
 
-// ExecuteTask executes a single task (exported for scheduler)
+// IsBusy returns whether the executor is currently busy
+func (e *Executor) IsBusy() bool {
+	return e.busy
+}
+
+// GetID returns the executor's ID
+func (e *Executor) GetID() int {
+	return e.id
+}
+
+// GetCurrentTask returns the ID of the current task being executed
+func (e *Executor) GetCurrentTask() string {
+	return e.currentTask
+}
+
+// ExecuteTask executes a single task with detailed logging
 func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
+	e.busy = true
+	e.currentTask = taskID
+	defer func() {
+		e.busy = false
+		e.currentTask = ""
+	}()
+
 	// Get task
 	task, err := e.taskRepo.GetByID(taskID)
 	if err != nil {
@@ -70,7 +116,7 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 
 	// Check if task is already running or completed
 	if task.Status != models.TaskStatusPending {
-		log.Printf("Task %s is not pending (status: %s), skipping", taskID, task.Status)
+		log.Printf("[Executor-%d] Task %s is not pending (status: %s), skipping", e.id, taskID, task.Status)
 		return nil
 	}
 
@@ -104,6 +150,20 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 	logWriter := bufio.NewWriter(logFile)
 	defer logWriter.Flush()
 
+	// Create execution record
+	execRecord := &ExecutionRecord{
+		TaskID:      taskID,
+		StartTime:   time.Now(),
+		Environment: make(map[string]string),
+		Steps:       make([]StepRecord, 0),
+		LogEntries:  make([]string, 0),
+	}
+
+	// Record global environment variables
+	for key, value := range workflowDef.Env {
+		execRecord.Environment[key] = value
+	}
+
 	// Update task status to running
 	now := time.Now()
 	task.Status = models.TaskStatusRunning
@@ -112,14 +172,23 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
 
-	writeLog(logWriter, "Task started")
-	writeLog(logWriter, fmt.Sprintf("Input: %s", task.InputPath))
-	writeLog(logWriter, fmt.Sprintf("Output: %s", task.OutputPath))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("[Executor-%d] Task started", e.id))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Input: %s", task.InputPath))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Output: %s", task.OutputPath))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Workflow: %s", wf.Name))
+
+	// Log environment variables
+	if len(workflowDef.Env) > 0 {
+		e.writeLog(logWriter, execRecord, "Environment variables:")
+		for key, value := range workflowDef.Env {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  %s=%s", key, value))
+		}
+	}
 
 	// Create output directory if it doesn't exist
 	outputDir := filepath.Dir(task.OutputPath)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		writeLog(logWriter, fmt.Sprintf("ERROR: Failed to create output directory: %v", err))
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("ERROR: Failed to create output directory: %v", err))
 		task.Status = models.TaskStatusFailed
 		task.ErrorMessage = fmt.Sprintf("Failed to create output directory: %v", err)
 		completedAt := time.Now()
@@ -127,7 +196,7 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 		e.taskRepo.Update(task)
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
-	writeLog(logWriter, fmt.Sprintf("Output directory: %s", outputDir))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Output directory: %s", outputDir))
 
 	// Get variables for substitution
 	vars := workflow.GetVariables(task.InputPath, task.OutputPath)
@@ -138,7 +207,7 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 	workflowStoppedWithFailure := false
 
 	for i, step := range workflowDef.Steps {
-		writeLog(logWriter, fmt.Sprintf("\n--- Step %d: %s ---", i+1, step.Name))
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("\n--- Step %d: %s ---", i+1, step.Name))
 
 		// Create step record
 		stepModel := &models.TaskStep{
@@ -148,39 +217,46 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 			Status:  models.StepStatusPending,
 		}
 		if err := e.stepRepo.Create(stepModel); err != nil {
-			writeLog(logWriter, fmt.Sprintf("ERROR: Failed to create step record: %v", err))
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("ERROR: Failed to create step record: %v", err))
 			allStepsSucceeded = false
 			break
 		}
 
-		// Execute step
-		if err := e.executeStep(ctx, stepModel, step, vars, workflowDef.Env, logWriter); err != nil {
+		// Execute step and get detailed record
+		stepRecord, err := e.executeStep(ctx, stepModel, step, vars, workflowDef.Env, logWriter, execRecord)
+		if stepRecord != nil {
+			execRecord.Steps = append(execRecord.Steps, *stepRecord)
+		}
+
+		if err != nil {
 			// Check for workflow control errors
 			if stopSuccess, ok := err.(*WorkflowStopSuccess); ok {
-				writeLog(logWriter, fmt.Sprintf("INFO: %s", stopSuccess.Message))
+				e.writeLog(logWriter, execRecord, fmt.Sprintf("INFO: %s", stopSuccess.Message))
 				workflowStoppedWithSuccess = true
 				break
 			}
 			if stopFailure, ok := err.(*WorkflowStopFailure); ok {
-				writeLog(logWriter, fmt.Sprintf("INFO: %s", stopFailure.Message))
+				e.writeLog(logWriter, execRecord, fmt.Sprintf("INFO: %s", stopFailure.Message))
 				workflowStoppedWithFailure = true
 				allStepsSucceeded = false
 				break
 			}
 
 			// Regular step failure
-			writeLog(logWriter, fmt.Sprintf("ERROR: Step failed: %v", err))
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("ERROR: Step failed: %v", err))
 			allStepsSucceeded = false
 			break
 		}
 
 		// Check if context was cancelled
 		if ctx.Err() != nil {
-			writeLog(logWriter, "Task cancelled or timed out")
+			e.writeLog(logWriter, execRecord, "Task cancelled or timed out")
 			allStepsSucceeded = false
 			break
 		}
 	}
+
+	execRecord.EndTime = time.Now()
 
 	// Update task status
 	completedAt := time.Now()
@@ -188,7 +264,7 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 
 	if workflowStoppedWithSuccess || allStepsSucceeded {
 		task.Status = models.TaskStatusCompleted
-		writeLog(logWriter, "\nTask completed successfully")
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("\n[Executor-%d] Task completed successfully", e.id))
 	} else {
 		task.Status = models.TaskStatusFailed
 		if workflowStoppedWithFailure {
@@ -196,15 +272,18 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 		} else {
 			task.ErrorMessage = "One or more steps failed"
 		}
-		writeLog(logWriter, "\nTask failed")
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("\n[Executor-%d] Task failed", e.id))
 	}
+
+	duration := execRecord.EndTime.Sub(execRecord.StartTime)
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Total execution time: %v", duration))
 
 	logWriter.Flush()
 
 	// Read log file content and store in database
 	logContent, err := os.ReadFile(logFilePath)
 	if err != nil {
-		log.Printf("Failed to read log file: %v", err)
+		log.Printf("[Executor-%d] Failed to read log file: %v", e.id, err)
 	} else {
 		task.LogText = string(logContent)
 	}
@@ -215,25 +294,34 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 
 	// Remove log file after importing to database
 	if err := os.Remove(logFilePath); err != nil {
-		log.Printf("Failed to remove log file: %v", err)
+		log.Printf("[Executor-%d] Failed to remove log file: %v", e.id, err)
 	}
 
-	log.Printf("Task %s completed with status: %s", taskID, task.Status)
+	log.Printf("[Executor-%d] Task %s completed with status: %s (duration: %v)", e.id, taskID, task.Status, duration)
 	return nil
 }
 
-// executeStep executes a single step
-func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, step workflow.Step, vars workflow.Variables, globalEnv map[string]string, logWriter *bufio.Writer) error {
+// executeStep executes a single step with detailed logging
+func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, step workflow.Step, vars workflow.Variables, globalEnv map[string]string, logWriter *bufio.Writer, execRecord *ExecutionRecord) (*StepRecord, error) {
+	stepRecord := &StepRecord{
+		Name:        step.Name,
+		Command:     step.Run,
+		Environment: make(map[string]string),
+		StartTime:   time.Now(),
+		LogEntries:  make([]string, 0),
+	}
+
 	// Substitute variables in command
 	command := workflow.SubstituteVariables(step.Run, vars)
-	writeLog(logWriter, fmt.Sprintf("Command: %s", command))
+	stepRecord.Command = command
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Command: %s", command))
 
 	// Update step status to running
 	now := time.Now()
 	stepModel.Status = models.StepStatusRunning
 	stepModel.StartedAt = &now
 	if err := e.stepRepo.Update(stepModel); err != nil {
-		return fmt.Errorf("failed to update step status: %w", err)
+		return stepRecord, fmt.Errorf("failed to update step status: %w", err)
 	}
 
 	// Create context with step timeout
@@ -245,12 +333,29 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 
 	// Set environment variables
 	cmd.Env = os.Environ()
+
+	// Add global environment variables
 	for key, value := range globalEnv {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, value))
+		envVar := fmt.Sprintf("%s=%s", key, value)
+		cmd.Env = append(cmd.Env, envVar)
+		stepRecord.Environment[key] = value
 	}
+
+	// Add step-specific environment variables
 	for key, value := range step.Env {
 		substValue := workflow.SubstituteVariables(value, vars)
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, substValue))
+		envVar := fmt.Sprintf("%s=%s", key, substValue)
+		cmd.Env = append(cmd.Env, envVar)
+		stepRecord.Environment[key] = substValue
+	}
+
+	// Log environment variables for this step
+	if len(step.Env) > 0 {
+		e.writeLog(logWriter, execRecord, "Step environment variables:")
+		for key, value := range step.Env {
+			substValue := workflow.SubstituteVariables(value, vars)
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  %s=%s", key, substValue))
+		}
 	}
 
 	// Capture output
@@ -258,8 +363,12 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	e.writeLog(logWriter, execRecord, "Executing command...")
+
 	// Execute command
 	err := cmd.Run()
+	stepRecord.EndTime = time.Now()
+
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -268,15 +377,21 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 			exitCode = 1
 		}
 	}
+	stepRecord.ExitCode = exitCode
 
 	// Write output to log
 	if stdout.Len() > 0 {
-		writeLog(logWriter, fmt.Sprintf("STDOUT:\n%s", stdout.String()))
+		stepRecord.Stdout = stdout.String()
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("STDOUT:\n%s", stdout.String()))
 	}
 	if stderr.Len() > 0 {
-		writeLog(logWriter, fmt.Sprintf("STDERR:\n%s", stderr.String()))
+		stepRecord.Stderr = stderr.String()
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("STDERR:\n%s", stderr.String()))
 	}
-	writeLog(logWriter, fmt.Sprintf("Exit code: %d", exitCode))
+
+	duration := stepRecord.EndTime.Sub(stepRecord.StartTime)
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Exit code: %d", exitCode))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Step duration: %v", duration))
 
 	// Update step
 	completedAt := time.Now()
@@ -302,40 +417,44 @@ func (e *Executor) executeStep(ctx context.Context, stepModel *models.TaskStep, 
 		stepModel.Status = models.StepStatusCompleted
 		stopWorkflow = true
 		forceTaskSuccess = true
-		writeLog(logWriter, "INFO: Workflow stopped with success (exit code 100)")
+		e.writeLog(logWriter, execRecord, "INFO: Workflow stopped with success (exit code 100)")
 	case 101:
 		// Failure and stop workflow
 		stepModel.Status = models.StepStatusFailed
 		stopWorkflow = true
 		forceTaskFailure = true
-		writeLog(logWriter, "INFO: Workflow stopped with failure (exit code 101)")
+		e.writeLog(logWriter, execRecord, "INFO: Workflow stopped with failure (exit code 101)")
 	default:
 		stepModel.Status = models.StepStatusFailed
 	}
 
 	if err := e.stepRepo.Update(stepModel); err != nil {
-		return fmt.Errorf("failed to update step: %w", err)
+		return stepRecord, fmt.Errorf("failed to update step: %w", err)
 	}
 
 	// Return special error types for workflow control
 	if stopWorkflow {
 		if forceTaskSuccess {
-			return &WorkflowStopSuccess{Message: "Workflow stopped with success"}
+			return stepRecord, &WorkflowStopSuccess{Message: "Workflow stopped with success"}
 		}
 		if forceTaskFailure {
-			return &WorkflowStopFailure{Message: "Workflow stopped with failure"}
+			return stepRecord, &WorkflowStopFailure{Message: "Workflow stopped with failure"}
 		}
 	}
 
 	if exitCode != 0 && exitCode != 100 {
-		return fmt.Errorf("step exited with code %d", exitCode)
+		return stepRecord, fmt.Errorf("step exited with code %d", exitCode)
 	}
 
-	return nil
+	return stepRecord, nil
 }
 
-// writeLog writes a timestamped log entry
-func writeLog(w *bufio.Writer, message string) {
+// writeLog writes a timestamped log entry to both the writer and execution record
+func (e *Executor) writeLog(w *bufio.Writer, record *ExecutionRecord, message string) {
 	timestamp := time.Now().Format(time.RFC3339)
-	fmt.Fprintf(w, "[%s] %s\n", timestamp, message)
+	logEntry := fmt.Sprintf("[%s] %s", timestamp, message)
+	fmt.Fprintln(w, logEntry)
+	if record != nil {
+		record.LogEntries = append(record.LogEntries, logEntry)
+	}
 }

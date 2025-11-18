@@ -1,0 +1,27 @@
+<div class="monitoring-container">
+    <h2 class="monitoring-title">Activity Monitor</h2>
+    
+    <!-- Executor Pool Stats -->
+    <div class="stats-cards">
+        <div class="stat-card">
+            <div class="stat-label">Total Executors</div>
+            <div class="stat-value" id="statTotalExecutors">-</div>
+        </div>
+        <div class="stat-card stat-success">
+            <div class="stat-label">Available</div>
+            <div class="stat-value" id="statAvailableExecutors">-</div>
+        </div>
+        <div class="stat-card stat-warning">
+            <div class="stat-label">Busy</div>
+            <div class="stat-value" id="statBusyExecutors">-</div>
+        </div>
+    </div>
+
+    <!-- Executor List -->
+    <div class="executor-list-section">
+        <h3 class="section-title">Executor Status</h3>
+        <div class="executor-cards" id="executorCards">
+            <!-- Executor cards will be dynamically loaded -->
+        </div>
+    </div>
+</div>

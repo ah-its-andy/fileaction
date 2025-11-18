@@ -54,3 +54,13 @@ options:
   file_glob: "*.jpg,*.jpeg"
   skip_on_nochange: true
   output_dir_pattern: "../heic"
+  ignore:
+    - ".DS_Store"
+    - "Thumbs.db"
+    - "*.tmp"
+    - "**/temp/**"
+    - "**/.git/**"
+    - ".@__thumb"
+    - ".@__macos"
+    - "**/.@__thumb/**"
+    - "**/.@__macos/**"

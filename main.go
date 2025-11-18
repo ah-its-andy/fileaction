@@ -13,7 +13,6 @@ import (
 	"github.com/andi/fileaction/backend/api"
 	"github.com/andi/fileaction/backend/config"
 	"github.com/andi/fileaction/backend/database"
-	"github.com/andi/fileaction/backend/executor"
 	"github.com/andi/fileaction/backend/scheduler"
 	"github.com/andi/fileaction/backend/watcher"
 )
@@ -49,9 +48,7 @@ func main() {
 	log.Printf("Configuration: %+v", cfg)
 
 	// Initialize database
-	// cfg.Database.Path supports both SQLite and MySQL:
-	// - SQLite: "./data/fileaction.db" or any path ending with .db
-	// - MySQL: "user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local"
+	// cfg.Database.Path now should be MySQL DSN format: user:password@tcp(host:port)/dbname?params
 	db, err := database.New(cfg.Database.Path)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
@@ -59,46 +56,27 @@ func main() {
 	defer db.Close()
 	log.Println("Database initialized")
 
-	// Reset running tasks to pending status on startup
-	taskRepo := database.NewTaskRepo(db)
-	resetCount, err := taskRepo.ResetRunningTasks()
-	if err != nil {
-		log.Printf("Warning: Failed to reset running tasks: %v", err)
-	} else if resetCount > 0 {
-		log.Printf("Reset %d running task(s) to pending status", resetCount)
-	}
-
-	// Initialize executor
-	exec := executor.New(
+	// Initialize task scheduler with integrated executor pool
+	sched := scheduler.New(
 		db,
+		cfg.Execution.DefaultConcurrency,
+		2*time.Second,
 		cfg.Logging.Dir,
 		cfg.Execution.TaskTimeout,
 		cfg.Execution.StepTimeout,
 	)
-	log.Println("Executor initialized")
-
-	// Initialize scheduler
-	sched := scheduler.New(
-		db,
-		exec,
-		cfg.Scheduler.MaxRunning,
-		cfg.Scheduler.ScanInterval,
-	)
 	sched.Start()
 	defer sched.Stop()
-	log.Println("Scheduler initialized and started")
+	log.Printf("Task scheduler initialized with %d executors", cfg.Execution.DefaultConcurrency)
 
 	// Initialize file watcher
 	watch, err := watcher.New(db)
 	if err != nil {
 		log.Fatalf("Failed to initialize file watcher: %v", err)
 	}
-	// Start file watcher asynchronously
-	go func() {
-		if err := watch.Start(); err != nil {
-			log.Printf("File watcher error: %v", err)
-		}
-	}()
+	if err := watch.Start(); err != nil {
+		log.Fatalf("Failed to start file watcher: %v", err)
+	}
 	defer watch.Stop()
 	log.Println("File watcher initialized and started")
 
@@ -138,13 +116,13 @@ func main() {
 			log.Printf("Error shutting down server: %v", err)
 		}
 
-		// Stop file watcher
-		log.Println("Stopping file watcher...")
-		watch.Stop()
-
-		// Stop scheduler (this will wait for running tasks to complete or timeout)
+		// Stop scheduler (this will wait for running tasks to complete)
 		log.Println("Stopping scheduler...")
 		sched.Stop()
+
+		// Stop watcher
+		log.Println("Stopping watcher...")
+		watch.Stop()
 
 		// Close database connections
 		log.Println("Closing database connections...")

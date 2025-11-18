@@ -237,3 +237,95 @@ func TestMatchesFileGlob(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchesIgnorePattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		filePath string
+		patterns []string
+		expected bool
+	}{
+		{
+			name:     "match .DS_Store",
+			filePath: "/path/to/.DS_Store",
+			patterns: []string{".DS_Store"},
+			expected: true,
+		},
+		{
+			name:     "match Thumbs.db",
+			filePath: "/path/to/Thumbs.db",
+			patterns: []string{"Thumbs.db"},
+			expected: true,
+		},
+		{
+			name:     "match *.tmp files",
+			filePath: "/path/to/file.tmp",
+			patterns: []string{"*.tmp"},
+			expected: true,
+		},
+		{
+			name:     "match .git directory",
+			filePath: "/path/to/.git/config",
+			patterns: []string{".git"},
+			expected: true,
+		},
+		{
+			name:     "match **/.git/** pattern",
+			filePath: "/path/to/.git/objects/abc",
+			patterns: []string{"**/.git/**"},
+			expected: true,
+		},
+		{
+			name:     "match **/temp/** pattern",
+			filePath: "/path/to/temp/file.txt",
+			patterns: []string{"**/temp/**"},
+			expected: true,
+		},
+		{
+			name:     "no match",
+			filePath: "/path/to/file.jpg",
+			patterns: []string{".DS_Store", "*.tmp"},
+			expected: false,
+		},
+		{
+			name:     "multiple patterns - first matches",
+			filePath: "/path/to/.DS_Store",
+			patterns: []string{".DS_Store", "Thumbs.db", "*.tmp"},
+			expected: true,
+		},
+		{
+			name:     "multiple patterns - last matches",
+			filePath: "/path/to/file.tmp",
+			patterns: []string{".DS_Store", "Thumbs.db", "*.tmp"},
+			expected: true,
+		},
+		{
+			name:     "empty patterns",
+			filePath: "/path/to/file.jpg",
+			patterns: []string{},
+			expected: false,
+		},
+		{
+			name:     "match node_modules directory",
+			filePath: "/path/to/node_modules/package/index.js",
+			patterns: []string{"node_modules"},
+			expected: true,
+		},
+		{
+			name:     "match drafts in any subdirectory",
+			filePath: "/images/drafts/photo.jpg",
+			patterns: []string{"**/drafts/**"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MatchesIgnorePattern(tt.filePath, tt.patterns)
+			if result != tt.expected {
+				t.Errorf("Expected %v for patterns %v on file '%s', got %v",
+					tt.expected, tt.patterns, tt.filePath, result)
+			}
+		})
+	}
+}
