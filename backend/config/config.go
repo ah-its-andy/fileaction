@@ -42,6 +42,10 @@ type Config struct {
 		MaxRunning   int           `yaml:"max_running"`
 		ScanInterval time.Duration `yaml:"scan_interval"`
 	} `yaml:"scheduler"`
+
+	Watcher struct {
+		MaxPendingTasks int `yaml:"max_pending_tasks"`
+	} `yaml:"watcher"`
 }
 
 // Load loads configuration from a YAML file
@@ -90,6 +94,9 @@ func Load(path string) (*Config, error) {
 	if cfg.Scheduler.ScanInterval == 0 {
 		cfg.Scheduler.ScanInterval = 2 * time.Second
 	}
+	if cfg.Watcher.MaxPendingTasks == 0 {
+		cfg.Watcher.MaxPendingTasks = 50 // Default to 50, 0 means no limit after override
+	}
 
 	return &cfg, nil
 }
@@ -112,6 +119,11 @@ func LoadFromEnv(path string) (*Config, error) {
 	if maxRunning := os.Getenv("MAX_RUNNING"); maxRunning != "" {
 		if val, err := strconv.Atoi(maxRunning); err == nil && val > 0 {
 			cfg.Execution.DefaultConcurrency = val
+		}
+	}
+	if maxPending := os.Getenv("MAX_PENDING_TASKS"); maxPending != "" {
+		if val, err := strconv.Atoi(maxPending); err == nil && val >= 0 {
+			cfg.Watcher.MaxPendingTasks = val // 0 means no limit
 		}
 	}
 

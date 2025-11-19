@@ -44,6 +44,9 @@ type Watcher struct {
 	// Debounce map to avoid processing same file multiple times
 	debounceMap map[string]*debounceEntry
 	debounceMu  sync.Mutex
+
+	// Maximum pending tasks per workflow (0 means no limit)
+	maxPendingTasks int
 }
 
 type debounceEntry struct {
@@ -53,21 +56,27 @@ type debounceEntry struct {
 }
 
 // New creates a new file watcher
-func New(db *database.DB) (*Watcher, error) {
+func New(db *database.DB, maxPendingTasks int) (*Watcher, error) {
 	fsWatcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
+	// Default to 50 if not specified
+	if maxPendingTasks < 0 {
+		maxPendingTasks = 50
+	}
+
 	return &Watcher{
-		db:           db,
-		fileRepo:     database.NewFileRepo(db),
-		taskRepo:     database.NewTaskRepo(db),
-		workflowRepo: database.NewWorkflowRepo(db),
-		watcher:      fsWatcher,
-		stopChan:     make(chan struct{}),
-		watchedPaths: make(map[string][]string),
-		debounceMap:  make(map[string]*debounceEntry),
+		db:              db,
+		fileRepo:        database.NewFileRepo(db),
+		taskRepo:        database.NewTaskRepo(db),
+		workflowRepo:    database.NewWorkflowRepo(db),
+		watcher:         fsWatcher,
+		stopChan:        make(chan struct{}),
+		watchedPaths:    make(map[string][]string),
+		debounceMap:     make(map[string]*debounceEntry),
+		maxPendingTasks: maxPendingTasks,
 	}, nil
 }
 
@@ -716,9 +725,13 @@ func (w *Watcher) ScanWorkflow(workflowID string) (*ScanResult, error) {
 	return w.scanWorkflow(workflowID)
 }
 
-// waitForTaskSlot waits until pending task count is below 50 for the given workflow
+// waitForTaskSlot waits until pending task count is below the limit for the given workflow
 func (w *Watcher) waitForTaskSlot(workflowID string) {
-	const maxPending = 50
+	// If maxPendingTasks is 0, no limit
+	if w.maxPendingTasks == 0 {
+		return
+	}
+
 	const checkInterval = 2 * time.Second
 
 	for {
@@ -738,12 +751,12 @@ func (w *Watcher) waitForTaskSlot(workflowID string) {
 		}
 
 		// If below limit, proceed
-		if pendingCount < maxPending {
+		if pendingCount < w.maxPendingTasks {
 			return
 		}
 
 		// Log and wait
-		log.Printf("Workflow %s: Pending task limit reached (%d/%d), waiting for tasks to be processed...", workflowID, pendingCount, maxPending)
+		log.Printf("Workflow %s: Pending task limit reached (%d/%d), waiting for tasks to be processed...", workflowID, pendingCount, w.maxPendingTasks)
 		time.Sleep(checkInterval)
 	}
 }

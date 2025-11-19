@@ -37,3 +37,8 @@ scheduler:
   max_running: 2
   # Interval for scanning pending tasks
   scan_interval: 2s
+
+# Watcher configuration
+watcher:
+  # Maximum number of pending tasks per workflow (0 = no limit)
+  max_pending_tasks: 50

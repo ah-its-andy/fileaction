@@ -78,7 +78,7 @@ func main() {
 	log.Printf("Task scheduler initialized with %d executors", cfg.Execution.DefaultConcurrency)
 
 	// Initialize file watcher
-	watch, err := watcher.New(db)
+	watch, err := watcher.New(db, cfg.Watcher.MaxPendingTasks)
 	if err != nil {
 		log.Fatalf("Failed to initialize file watcher: %v", err)
 	}
@@ -86,7 +86,7 @@ func main() {
 		log.Fatalf("Failed to start file watcher: %v", err)
 	}
 	defer watch.Stop()
-	log.Println("File watcher initialized and started")
+	log.Printf("File watcher initialized and started (max pending tasks: %d)", cfg.Watcher.MaxPendingTasks)
 
 	// Initialize API server
 	server := api.New(db, sched, watch, cfg.Logging.Dir)
