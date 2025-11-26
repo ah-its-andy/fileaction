@@ -1,0 +1,82 @@
+name: video-transcoder
+description: Transcode videos to different formats and resolutions
+version: 1.0.0
+dependencies:
+  - ffmpeg>=4.0.0
+inputs:
+  output_format:
+    type: string
+    default: "mp4"
+    required: true
+    description: "Output video format (mp4, webm, mkv)"
+  codec:
+    type: string
+    default: "h264"
+    required: false
+    description: "Video codec (h264, h265, vp9)"
+  resolution:
+    type: string
+    default: "1920x1080"
+    required: false
+    description: "Output resolution (e.g., 1920x1080, 1280x720)"
+  bitrate:
+    type: string
+    default: "2M"
+    required: false
+    description: "Video bitrate (e.g., 2M, 4M)"
+  audio_codec:
+    type: string
+    default: "aac"
+    required: false
+    description: "Audio codec (aac, mp3, opus)"
+  preset:
+    type: string
+    default: "medium"
+    required: false
+    description: "Encoding preset (ultrafast, fast, medium, slow)"
+steps:
+  - name: Validate input
+    run: |
+      if [ ! -f "${{ input_path }}" ]; then
+        echo "Error: Input file not found"
+        exit 1
+      fi
+      echo "Transcoding: ${{ file_name }}"
+      echo "Target format: ${{ inputs.output_format }}"
+      echo "Resolution: ${{ inputs.resolution }}"
+    
+  - name: Get video info
+    run: |
+      ffprobe -v error -show_entries format=duration,size,bit_rate \
+        -show_entries stream=codec_name,width,height \
+        -of default=noprint_wrappers=1 "${{ input_path }}"
+    
+  - name: Transcode video
+    run: |
+      ffmpeg -i "${{ input_path }}" \
+        -c:v ${{ inputs.codec }} \
+        -preset ${{ inputs.preset }} \
+        -b:v ${{ inputs.bitrate }} \
+        -vf scale=${{ inputs.resolution }} \
+        -c:a ${{ inputs.audio_codec }} \
+        -y "${{ output_path }}"
+    timeout: 3600
+    
+  - name: Verify output
+    run: |
+      if [ ! -f "${{ output_path }}" ]; then
+        echo "Error: Output file was not created"
+        exit 1
+      fi
+      
+      input_size=$(stat -f%z "${{ input_path }}" 2>/dev/null || stat -c%s "${{ input_path }}")
+      output_size=$(stat -f%z "${{ output_path }}" 2>/dev/null || stat -c%s "${{ output_path }}")
+      
+      echo "Input size: ${input_size} bytes"
+      echo "Output size: ${output_size} bytes"
+      echo "Transcoding completed successfully"
+tags:
+  - video
+  - transcoding
+  - ffmpeg
+  - media

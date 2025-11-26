@@ -1,0 +1,93 @@
+name: notification-sender
+description: Send notifications via various channels (email, webhook, slack)
+version: 1.0.0
+dependencies:
+  - curl
+inputs:
+  channel:
+    type: string
+    default: "webhook"
+    required: true
+    description: "Notification channel (webhook, slack, email)"
+  webhook_url:
+    type: string
+    default: ""
+    required: false
+    description: "Webhook URL for notifications"
+  slack_webhook:
+    type: string
+    default: ""
+    required: false
+    description: "Slack webhook URL"
+  message:
+    type: string
+    default: "File processing completed: ${{ file_name }}"
+    required: false
+    description: "Notification message"
+  on_success:
+    type: boolean
+    default: true
+    required: false
+    description: "Send notification on success"
+  on_failure:
+    type: boolean
+    default: true
+    required: false
+    description: "Send notification on failure"
+steps:
+  - name: Prepare notification message
+    run: |
+      message="${{ inputs.message }}"
+      echo "Notification message: ${message}"
+      echo "NOTIFICATION_MESSAGE=${message}" >> /tmp/notification_env.txt
+    
+  - name: Send webhook notification
+    condition: ${{ inputs.channel == 'webhook' && inputs.webhook_url != '' }}
+    run: |
+      source /tmp/notification_env.txt || true
+      curl -X POST "${{ inputs.webhook_url }}" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "message": "'"${NOTIFICATION_MESSAGE}"'",
+          "file": "${{ file_name }}",
+          "path": "${{ input_path }}",
+          "status": "completed"
+        }'
+      echo "Webhook notification sent"
+    
+  - name: Send Slack notification
+    condition: ${{ inputs.channel == 'slack' && inputs.slack_webhook != '' }}
+    run: |
+      source /tmp/notification_env.txt || true
+      curl -X POST "${{ inputs.slack_webhook }}" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "text": "'"${NOTIFICATION_MESSAGE}"'",
+          "attachments": [{
+            "color": "good",
+            "fields": [
+              {
+                "title": "File",
+                "value": "${{ file_name }}",
+                "short": true
+              },
+              {
+                "title": "Status",
+                "value": "Completed",
+                "short": true
+              }
+            ]
+          }]
+        }'
+      echo "Slack notification sent"
+    
+  - name: Log notification
+    run: |
+      echo "Notification sent successfully via ${{ inputs.channel }}"
+      echo "File: ${{ file_name }}"
+      echo "Timestamp: $(date)"
+tags:
+  - notification
+  - webhook
+  - slack
+  - integration

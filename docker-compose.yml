@@ -11,9 +11,9 @@ services:
       # Mount directories for file processing
       - /Users/andi/source/github/fileaction_test:/app/library
       # Persist SQLite database
-      - fileaction_data:/app/data
+      - /Users/andi/source/github/fileaction_test/data:/app/data
       # Persist logs
-      - fileaction_logs:/app/data/logs
+      - /Users/andi/source/github/fileaction_test/logs:/app/data/logs
     environment:
       - DB_PATH=/app/data/fileaction.db
       - LOG_DIR=/app/data/logs

@@ -1,0 +1,50 @@
+<div class="modal" id="pluginModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="pluginModalTitle">Add Plugin</h3>
+            <button class="modal-close" onclick="closeModal('pluginModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="pluginForm">
+                <div class="form-group">
+                    <label for="pluginName">Plugin Name *</label>
+                    <input type="text" id="pluginName" name="name" required 
+                           placeholder="e.g., image-optimizer">
+                </div>
+                
+                <div class="form-group">
+                    <label for="pluginDescription">Description</label>
+                    <textarea id="pluginDescription" name="description" rows="2" 
+                              placeholder="Brief description of what this plugin does"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="pluginYaml">Plugin Definition (YAML) *</label>
+                    <textarea id="pluginYaml" name="yaml_content" class="form-textarea" 
+                              rows="20" required 
+                              placeholder="Enter plugin YAML definition..."></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('pluginModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Plugin</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Plugin Detail Modal -->
+<div class="modal" id="pluginDetailModal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="pluginDetailTitle">Plugin Details</h3>
+            <button class="modal-close" onclick="closeModal('pluginDetailModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="pluginDetailContent">
+                <!-- Plugin details will be rendered here -->
+            </div>
+        </div>
+    </div>
+</div>

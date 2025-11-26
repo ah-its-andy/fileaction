@@ -16,8 +16,11 @@ const state = {
     logWebSocket: null, // WebSocket connection for real-time logs
     currentTaskId: null,
     editingWorkflowId: null,
-    currentTab: 'workflows', // 'workflows' or 'monitoring'
+    currentTab: 'workflows', // 'workflows', 'plugins', or 'monitoring'
     monitoringAutoRefresh: null,
+    plugins: [],
+    currentPluginId: null,
+    editingPluginId: null,
 };
 
 // Initialize application
@@ -591,11 +594,11 @@ function stopTasksAutoRefresh() {
     }
 }
 
-// ============== Workflow Modal ==============
+// ============== Workflow Slide Panel ==============
 
-function openWorkflowModal(workflowId = null) {
-    const modal = document.getElementById('workflowModal');
-    const title = document.getElementById('modalTitle');
+async function openWorkflowModal(workflowId = null) {
+    const panel = document.getElementById('workflowPanel');
+    const title = document.getElementById('workflowPanelTitle');
     const form = document.getElementById('workflowForm');
     
     form.reset();
@@ -615,7 +618,104 @@ function openWorkflowModal(workflowId = null) {
         document.getElementById('workflowYaml').value = getDefaultWorkflowYAML();
     }
     
-    modal.classList.add('active');
+    // Load plugins for inserter
+    await loadPluginsForInserter();
+    
+    panel.classList.add('active');
+}
+
+function closeWorkflowPanel() {
+    const panel = document.getElementById('workflowPanel');
+    panel.classList.remove('active');
+}
+
+async function loadPluginsForInserter() {
+    try {
+        const plugins = await apiRequest('/plugins');
+        renderPluginInserter(plugins);
+    } catch (error) {
+        console.error('Failed to load plugins for inserter:', error);
+        document.getElementById('pluginInserterList').innerHTML = `
+            <div class="plugin-inserter-empty">
+                <div class="plugin-inserter-empty-icon">⚠️</div>
+                <p>Failed to load plugins</p>
+            </div>
+        `;
+    }
+}
+
+function renderPluginInserter(plugins) {
+    const container = document.getElementById('pluginInserterList');
+    
+    if (plugins.length === 0) {
+        container.innerHTML = `
+            <div class="plugin-inserter-empty">
+                <div class="plugin-inserter-empty-icon">🧩</div>
+                <p>No plugins available</p>
+                <small>Create plugins in the Plugins tab</small>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = plugins.map(plugin => `
+        <div class="plugin-inserter-item" onclick="insertPluginIntoWorkflow('${escapeHtml(plugin.name)}', '${escapeHtml(plugin.current_version || '')}')">
+            <div class="plugin-inserter-item-header">
+                <span class="plugin-inserter-icon">🧩</span>
+                <span class="plugin-inserter-name">${escapeHtml(plugin.name)}</span>
+                <span class="plugin-inserter-version">v${escapeHtml(plugin.current_version || '0.0.0')}</span>
+            </div>
+            <div class="plugin-inserter-description">${escapeHtml(plugin.description || 'No description')}</div>
+        </div>
+    `).join('');
+}
+
+function filterPluginInserter() {
+    const searchTerm = document.getElementById('pluginInserterSearch').value.toLowerCase();
+    const items = document.querySelectorAll('.plugin-inserter-item');
+    
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+            item.style.display = 'block';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+
+function insertPluginIntoWorkflow(pluginName, version) {
+    const yamlTextarea = document.getElementById('workflowYaml');
+    const currentYaml = yamlTextarea.value;
+    
+    // Generate plugin step YAML
+    const pluginStep = `
+  - name: ${pluginName}
+    uses: ${pluginName}@v${version}
+    with:
+      # Configure plugin inputs here
+      input1: value1`;
+    
+    // Try to insert after "steps:" if it exists
+    if (currentYaml.includes('steps:')) {
+        // Find the position after "steps:"
+        const stepsIndex = currentYaml.indexOf('steps:');
+        const afterStepsIndex = currentYaml.indexOf('\n', stepsIndex) + 1;
+        
+        const before = currentYaml.substring(0, afterStepsIndex);
+        const after = currentYaml.substring(afterStepsIndex);
+        
+        yamlTextarea.value = before + pluginStep + '\n' + after;
+    } else {
+        // Append at the end
+        yamlTextarea.value = currentYaml + '\n\nsteps:' + pluginStep;
+    }
+    
+    // Scroll to the inserted position
+    yamlTextarea.focus();
+    yamlTextarea.scrollTop = yamlTextarea.scrollHeight;
+    
+    showNotification(`Plugin "${pluginName}" inserted`, 'success');
 }
 
 function editWorkflow(workflowId) {
@@ -653,7 +753,7 @@ async function handleWorkflowSubmit(e) {
             state.editingWorkflowId = workflow.id;
         }
         
-        closeModal('workflowModal');
+        closeWorkflowPanel();
         await loadWorkflows();
         
         if (state.editingWorkflowId) {
@@ -767,6 +867,12 @@ function switchTab(tabName) {
         document.querySelector('.sidebar').style.display = 'flex';
         stopMonitoringAutoRefresh();
         startTasksAutoRefresh();
+    } else if (tabName === 'plugins') {
+        document.getElementById('pluginsTab').classList.add('active');
+        document.querySelector('.sidebar').style.display = 'none';
+        stopMonitoringAutoRefresh();
+        stopTasksAutoRefresh();
+        loadPlugins();
     } else if (tabName === 'monitoring') {
         document.getElementById('monitoringTab').classList.add('active');
         document.querySelector('.sidebar').style.display = 'none';
@@ -851,3 +957,309 @@ function stopMonitoringAutoRefresh() {
         state.monitoringAutoRefresh = null;
     }
 }
+
+// ============== Plugin Management ==============
+
+async function loadPlugins() {
+    try {
+        const plugins = await apiRequest('/plugins');
+        state.plugins = plugins;
+        renderPluginsList();
+    } catch (error) {
+        console.error('Failed to load plugins:', error);
+        showNotification('Failed to load plugins', 'error');
+    }
+}
+
+function renderPluginsList() {
+    const container = document.getElementById('pluginsList');
+    
+    if (state.plugins.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <div class="empty-state-icon">🧩</div>
+                <p>No plugins yet</p>
+                <small>Add your first plugin to extend workflow capabilities</small>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = state.plugins.map(plugin => `
+        <div class="plugin-card" onclick="viewPlugin('${plugin.id}')">
+            <div class="plugin-card-header">
+                <div class="plugin-icon">🧩</div>
+                <div class="plugin-badge">${escapeHtml(plugin.source)}</div>
+            </div>
+            <div class="plugin-card-body">
+                <h3 class="plugin-card-title">${escapeHtml(plugin.name)}</h3>
+                <p class="plugin-card-description">${escapeHtml(plugin.description || 'No description')}</p>
+                <div class="plugin-card-meta">
+                    <span class="plugin-version">v${escapeHtml(plugin.current_version || '0.0.0')}</span>
+                    <span class="plugin-date">${formatDate(plugin.updated_at)}</span>
+                </div>
+            </div>
+            <div class="plugin-card-actions">
+                <button class="btn-icon" onclick="event.stopPropagation(); editPlugin('${plugin.id}')" title="Edit">
+                    ✏️
+                </button>
+                <button class="btn-icon" onclick="event.stopPropagation(); deletePlugin('${plugin.id}')" title="Delete">
+                    🗑️
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function filterPlugins() {
+    const searchTerm = document.getElementById('pluginSearchInput').value.toLowerCase();
+    const sourceFilter = document.getElementById('pluginSourceFilter').value;
+    
+    const filtered = state.plugins.filter(plugin => {
+        const matchesSearch = !searchTerm || 
+            plugin.name.toLowerCase().includes(searchTerm) ||
+            (plugin.description || '').toLowerCase().includes(searchTerm);
+        
+        const matchesSource = !sourceFilter || plugin.source === sourceFilter;
+        
+        return matchesSearch && matchesSource;
+    });
+    
+    const container = document.getElementById('pluginsList');
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <div class="empty-state-icon">🔍</div>
+                <p>No plugins found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = filtered.map(plugin => `
+        <div class="plugin-card" onclick="viewPlugin('${plugin.id}')">
+            <div class="plugin-card-header">
+                <div class="plugin-icon">🧩</div>
+                <div class="plugin-badge">${escapeHtml(plugin.source)}</div>
+            </div>
+            <div class="plugin-card-body">
+                <h3 class="plugin-card-title">${escapeHtml(plugin.name)}</h3>
+                <p class="plugin-card-description">${escapeHtml(plugin.description || 'No description')}</p>
+                <div class="plugin-card-meta">
+                    <span class="plugin-version">v${escapeHtml(plugin.current_version || '0.0.0')}</span>
+                    <span class="plugin-date">${formatDate(plugin.updated_at)}</span>
+                </div>
+            </div>
+            <div class="plugin-card-actions">
+                <button class="btn-icon" onclick="event.stopPropagation(); editPlugin('${plugin.id}')" title="Edit">
+                    ✏️
+                </button>
+                <button class="btn-icon" onclick="event.stopPropagation(); deletePlugin('${plugin.id}')" title="Delete">
+                    🗑️
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function openPluginModal(pluginId = null) {
+    state.editingPluginId = pluginId;
+    const modal = document.getElementById('pluginModal');
+    const form = document.getElementById('pluginForm');
+    const title = document.getElementById('pluginModalTitle');
+    
+    if (pluginId) {
+        title.textContent = 'Edit Plugin';
+        // Load plugin data
+        loadPluginForEdit(pluginId);
+    } else {
+        title.textContent = 'Add Plugin';
+        form.reset();
+        // Set default template
+        const defaultYaml = `name: my-plugin
+description: Plugin description
+version: 1.0.0
+dependencies: []
+inputs:
+  input1:
+    type: string
+    default: "value"
+    required: true
+    description: "Input description"
+steps:
+  - name: Step 1
+    run: echo "Hello from plugin"
+tags:
+  - utility`;
+        document.getElementById('pluginYaml').value = defaultYaml;
+    }
+    
+    modal.classList.add('active');
+}
+
+async function loadPluginForEdit(pluginId) {
+    try {
+        const data = await apiRequest(`/plugins/${pluginId}`);
+        const plugin = data.plugin;
+        const versions = data.versions;
+        
+        // Get current version YAML
+        const currentVersion = versions.find(v => v.id === plugin.current_version_id);
+        
+        document.getElementById('pluginName').value = plugin.name;
+        document.getElementById('pluginName').disabled = true; // Can't change name
+        document.getElementById('pluginDescription').value = plugin.description || '';
+        document.getElementById('pluginYaml').value = currentVersion ? currentVersion.yaml_content : '';
+    } catch (error) {
+        console.error('Failed to load plugin:', error);
+        showNotification('Failed to load plugin', 'error');
+    }
+}
+
+async function handlePluginSubmit(e) {
+    e.preventDefault();
+    
+    const form = e.target;
+    const formData = {
+        name: form.name.value.trim(),
+        description: form.description.value.trim(),
+        yaml_content: form.yaml_content.value.trim(),
+    };
+    
+    try {
+        if (state.editingPluginId) {
+            // Update existing plugin (creates new version)
+            await apiRequest(`/plugins/${state.editingPluginId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    description: formData.description,
+                    yaml_content: formData.yaml_content,
+                }),
+            });
+            showNotification('Plugin updated successfully', 'success');
+        } else {
+            // Create new plugin
+            await apiRequest('/plugins', {
+                method: 'POST',
+                body: JSON.stringify(formData),
+            });
+            showNotification('Plugin created successfully', 'success');
+        }
+        
+        closeModal('pluginModal');
+        await loadPlugins();
+    } catch (error) {
+        console.error('Failed to save plugin:', error);
+        showNotification(error.message || 'Failed to save plugin', 'error');
+    }
+}
+
+async function editPlugin(pluginId) {
+    openPluginModal(pluginId);
+}
+
+async function deletePlugin(pluginId) {
+    const plugin = state.plugins.find(p => p.id === pluginId);
+    if (!plugin) return;
+    
+    if (!confirm(`Are you sure you want to delete plugin "${plugin.name}"?\n\nThis will remove all versions and cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        await apiRequest(`/plugins/${pluginId}`, {
+            method: 'DELETE',
+        });
+        showNotification('Plugin deleted successfully', 'success');
+        await loadPlugins();
+    } catch (error) {
+        console.error('Failed to delete plugin:', error);
+        showNotification(error.message || 'Failed to delete plugin', 'error');
+    }
+}
+
+async function viewPlugin(pluginId) {
+    try {
+        const data = await apiRequest(`/plugins/${pluginId}`);
+        const plugin = data.plugin;
+        const versions = data.versions;
+        
+        const modal = document.getElementById('pluginDetailModal');
+        const title = document.getElementById('pluginDetailTitle');
+        const content = document.getElementById('pluginDetailContent');
+        
+        title.textContent = plugin.name;
+        
+        content.innerHTML = `
+            <div class="plugin-detail">
+                <div class="plugin-detail-header">
+                    <div>
+                        <h4>${escapeHtml(plugin.name)}</h4>
+                        <p>${escapeHtml(plugin.description || 'No description')}</p>
+                    </div>
+                    <div class="plugin-detail-meta">
+                        <div><strong>Source:</strong> ${escapeHtml(plugin.source)}</div>
+                        <div><strong>Current Version:</strong> v${escapeHtml(plugin.current_version || '0.0.0')}</div>
+                        <div><strong>Last Updated:</strong> ${formatDate(plugin.updated_at)}</div>
+                    </div>
+                </div>
+                
+                <div class="plugin-versions">
+                    <h5>Version History</h5>
+                    <div class="versions-list">
+                        ${versions.map(v => `
+                            <div class="version-item ${v.id === plugin.current_version_id ? 'active' : ''}">
+                                <div class="version-info">
+                                    <span class="version-number">v${escapeHtml(v.version)}</span>
+                                    ${v.id === plugin.current_version_id ? '<span class="version-badge">Current</span>' : ''}
+                                    <span class="version-date">${formatDate(v.created_at)}</span>
+                                </div>
+                                ${v.id !== plugin.current_version_id ? `
+                                    <button class="btn btn-sm" onclick="activatePluginVersion('${plugin.id}', '${v.id}')">
+                                        Activate
+                                    </button>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="closeModal('pluginDetailModal')">Close</button>
+                    <button class="btn btn-primary" onclick="closeModal('pluginDetailModal'); editPlugin('${plugin.id}')">Edit</button>
+                </div>
+            </div>
+        `;
+        
+        modal.classList.add('active');
+    } catch (error) {
+        console.error('Failed to load plugin details:', error);
+        showNotification('Failed to load plugin details', 'error');
+    }
+}
+
+async function activatePluginVersion(pluginId, versionId) {
+    if (!confirm('Are you sure you want to activate this version?\n\nThis will make it the current version for all new workflow executions.')) {
+        return;
+    }
+    
+    try {
+        await apiRequest(`/plugins/${pluginId}/versions/${versionId}/activate`, {
+            method: 'PUT',
+        });
+        showNotification('Version activated successfully', 'success');
+        closeModal('pluginDetailModal');
+        await loadPlugins();
+    } catch (error) {
+        console.error('Failed to activate version:', error);
+        showNotification(error.message || 'Failed to activate version', 'error');
+    }
+}
+
+// Setup plugin form submission
+document.addEventListener('DOMContentLoaded', () => {
+    const pluginForm = document.getElementById('pluginForm');
+    if (pluginForm) {
+        pluginForm.addEventListener('submit', handlePluginSubmit);
+    }
+});

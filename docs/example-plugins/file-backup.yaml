@@ -1,0 +1,118 @@
+name: file-backup
+description: Create backups of files with compression and versioning
+version: 1.0.0
+dependencies:
+  - tar
+  - gzip
+inputs:
+  backup_dir:
+    type: string
+    default: "./backups"
+    required: true
+    description: "Directory to store backups"
+  compression:
+    type: string
+    default: "gzip"
+    required: false
+    description: "Compression method (gzip, bzip2, xz, none)"
+  keep_versions:
+    type: number
+    default: 5
+    required: false
+    description: "Number of backup versions to keep"
+  add_timestamp:
+    type: boolean
+    default: true
+    required: false
+    description: "Add timestamp to backup filename"
+steps:
+  - name: Create backup directory
+    run: |
+      mkdir -p "${{ inputs.backup_dir }}"
+      echo "Backup directory: ${{ inputs.backup_dir }}"
+    
+  - name: Generate backup filename
+    run: |
+      if [ "${{ inputs.add_timestamp }}" = "true" ]; then
+        timestamp=$(date +%Y%m%d_%H%M%S)
+        backup_name="${{ file_base }}_${timestamp}"
+      else
+        backup_name="${{ file_base }}"
+      fi
+      
+      case "${{ inputs.compression }}" in
+        gzip)
+          backup_ext=".tar.gz"
+          ;;
+        bzip2)
+          backup_ext=".tar.bz2"
+          ;;
+        xz)
+          backup_ext=".tar.xz"
+          ;;
+        *)
+          backup_ext=".tar"
+          ;;
+      esac
+      
+      echo "BACKUP_FILE=${{ inputs.backup_dir }}/${backup_name}${backup_ext}" >> $GITHUB_ENV
+    env:
+      GITHUB_ENV: /tmp/backup_env.txt
+    
+  - name: Create backup
+    run: |
+      source /tmp/backup_env.txt || true
+      backup_path="${BACKUP_FILE:-${{ inputs.backup_dir }}/${{ file_base }}.tar.gz}"
+      
+      case "${{ inputs.compression }}" in
+        gzip)
+          tar -czf "${backup_path}" -C "${{ file_dir }}" "${{ file_name }}"
+          ;;
+        bzip2)
+          tar -cjf "${backup_path}" -C "${{ file_dir }}" "${{ file_name }}"
+          ;;
+        xz)
+          tar -cJf "${backup_path}" -C "${{ file_dir }}" "${{ file_name }}"
+          ;;
+        *)
+          tar -cf "${backup_path}" -C "${{ file_dir }}" "${{ file_name }}"
+          ;;
+      esac
+      
+      echo "Backup created: ${backup_path}"
+    
+  - name: Clean old backups
+    run: |
+      cd "${{ inputs.backup_dir }}"
+      backup_pattern="${{ file_base }}_*"
+      backup_count=$(ls -1 ${backup_pattern} 2>/dev/null | wc -l)
+      
+      if [ ${backup_count} -gt ${{ inputs.keep_versions }} ]; then
+        old_backups=$(ls -1t ${backup_pattern} | tail -n +$((${{ inputs.keep_versions }} + 1)))
+        for backup in ${old_backups}; do
+          echo "Removing old backup: ${backup}"
+          rm -f "${backup}"
+        done
+      fi
+      
+      echo "Backup rotation complete"
+    
+  - name: Report backup status
+    run: |
+      source /tmp/backup_env.txt || true
+      backup_path="${BACKUP_FILE:-${{ inputs.backup_dir }}/${{ file_base }}.tar.gz}"
+      
+      if [ -f "${backup_path}" ]; then
+        backup_size=$(stat -f%z "${backup_path}" 2>/dev/null || stat -c%s "${backup_path}")
+        echo "Backup successful"
+        echo "Backup location: ${backup_path}"
+        echo "Backup size: ${backup_size} bytes"
+      else
+        echo "Error: Backup file not found"
+        exit 1
+      fi
+tags:
+  - backup
+  - compression
+  - archive
+  - versioning

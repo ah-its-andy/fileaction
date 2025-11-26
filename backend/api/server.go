@@ -133,6 +133,17 @@ func (s *Server) setupRoutes() {
 	// Scheduler/Monitoring
 	api.Get("/scheduler/stats", s.getSchedulerStats)
 	api.Get("/scheduler/executors", s.getExecutorStatus)
+
+	// Plugins
+	api.Get("/plugins", s.listPlugins)
+	api.Post("/plugins", s.createPlugin)
+	api.Get("/plugins/:id", s.getPlugin)
+	api.Put("/plugins/:id", s.updatePlugin)
+	api.Delete("/plugins/:id", s.deletePlugin)
+	api.Get("/plugins/:id/versions", s.getPluginVersions)
+	api.Post("/plugins/:id/versions", s.createPluginVersion)
+	api.Put("/plugins/:id/versions/:version_id/activate", s.activatePluginVersion)
+	api.Get("/plugins/search", s.searchPlugins)
 }
 
 // Start starts the HTTP server

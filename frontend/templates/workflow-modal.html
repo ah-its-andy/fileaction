@@ -1,35 +1,55 @@
-<!-- Workflow Editor Modal -->
-<div class="modal" id="workflowModal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 class="modal-title" id="modalTitle">New Workflow</h3>
-            <button class="modal-close" onclick="closeModal('workflowModal')">&times;</button>
+<!-- Workflow Editor Slide-out Panel -->
+<div class="slide-panel" id="workflowPanel">
+    <div class="slide-panel-overlay" onclick="closeWorkflowPanel()"></div>
+    <div class="slide-panel-content">
+        <div class="slide-panel-header">
+            <h3 class="slide-panel-title" id="workflowPanelTitle">New Workflow</h3>
+            <button class="slide-panel-close" onclick="closeWorkflowPanel()">&times;</button>
         </div>
-        <div class="modal-body">
-            <form id="workflowForm">
-                <div class="form-group">
-                    <label class="form-label" for="workflowName">Name</label>
-                    <input type="text" class="form-input" id="workflowName" required>
+        <div class="slide-panel-body">
+            <div class="workflow-editor-container">
+                <!-- Left side: Form and YAML Editor -->
+                <div class="workflow-editor-main">
+                    <form id="workflowForm">
+                        <div class="form-group">
+                            <label class="form-label" for="workflowName">Name</label>
+                            <input type="text" class="form-input" id="workflowName" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="workflowDescription">Description</label>
+                            <input type="text" class="form-input" id="workflowDescription">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="workflowYaml">YAML Configuration</label>
+                            <textarea class="form-textarea" id="workflowYaml" rows="20" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-checkbox">
+                                <input type="checkbox" id="workflowEnabled" checked>
+                                <span>Enabled</span>
+                            </label>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" onclick="closeWorkflowPanel()">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </div>
+                    </form>
                 </div>
-                <div class="form-group">
-                    <label class="form-label" for="workflowDescription">Description</label>
-                    <input type="text" class="form-input" id="workflowDescription">
+                
+                <!-- Right side: Plugin Inserter -->
+                <div class="workflow-editor-sidebar">
+                    <div class="plugin-inserter">
+                        <div class="plugin-inserter-header">
+                            <h4>Available Plugins</h4>
+                            <input type="text" class="plugin-search" id="pluginInserterSearch" 
+                                   placeholder="Search plugins..." onkeyup="filterPluginInserter()">
+                        </div>
+                        <div class="plugin-inserter-list" id="pluginInserterList">
+                            <!-- Plugins will be loaded here -->
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label" for="workflowYaml">YAML Configuration</label>
-                    <textarea class="form-textarea" id="workflowYaml" rows="15" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label class="form-checkbox">
-                        <input type="checkbox" id="workflowEnabled" checked>
-                        <span>Enabled</span>
-                    </label>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('workflowModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
 </div>

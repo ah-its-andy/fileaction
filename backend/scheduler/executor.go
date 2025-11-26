@@ -64,6 +64,7 @@ type Executor struct {
 	taskRepo     *database.TaskRepo
 	stepRepo     *database.TaskStepRepo
 	workflowRepo *database.WorkflowRepo
+	pluginRepo   *database.PluginRepo
 	logDir       string
 	taskTimeout  time.Duration
 	stepTimeout  time.Duration
@@ -80,6 +81,7 @@ func newExecutor(id int, db *database.DB, logDir string, taskTimeout, stepTimeou
 		taskRepo:     database.NewTaskRepo(db),
 		stepRepo:     database.NewTaskStepRepo(db),
 		workflowRepo: database.NewWorkflowRepo(db),
+		pluginRepo:   database.NewPluginRepo(db),
 		logDir:       logDir,
 		taskTimeout:  taskTimeout,
 		stepTimeout:  stepTimeout,
@@ -236,6 +238,41 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 
 	for i, step := range workflowDef.Steps {
 		e.writeLog(logWriter, execRecord, fmt.Sprintf("\n--- Step %d: %s ---", i+1, step.Name))
+
+		// Check if this is a plugin step
+		if step.Uses != "" {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("Plugin: %s", step.Uses))
+
+			// Execute plugin
+			pluginErr := e.executePluginStep(ctx, taskID, step, vars, workflowDef.Env, logWriter, execRecord)
+			if pluginErr != nil {
+				// Check for workflow control errors
+				if stopSuccess, ok := pluginErr.(*WorkflowStopSuccess); ok {
+					e.writeLog(logWriter, execRecord, fmt.Sprintf("INFO: %s", stopSuccess.Message))
+					workflowStoppedWithSuccess = true
+					break
+				}
+				if stopFailure, ok := pluginErr.(*WorkflowStopFailure); ok {
+					e.writeLog(logWriter, execRecord, fmt.Sprintf("INFO: %s", stopFailure.Message))
+					workflowStoppedWithFailure = true
+					allStepsSucceeded = false
+					break
+				}
+
+				e.writeLog(logWriter, execRecord, fmt.Sprintf("ERROR: Plugin step failed: %v", pluginErr))
+				allStepsSucceeded = false
+				break
+			}
+
+			// Check if context was cancelled
+			if ctx.Err() != nil {
+				e.writeLog(logWriter, execRecord, "Task cancelled or timed out")
+				allStepsSucceeded = false
+				break
+			}
+
+			continue
+		}
 
 		// Create step record
 		stepModel := &models.TaskStep{
@@ -491,4 +528,221 @@ func (e *Executor) writeLog(w *bufio.Writer, record *ExecutionRecord, message st
 		// Broadcast to WebSocket clients
 		e.broadcastLog(record.TaskID, logEntry)
 	}
+}
+
+// executePluginStep executes a plugin-based step
+func (e *Executor) executePluginStep(ctx context.Context, taskID string, step workflow.Step, vars workflow.Variables, globalEnv map[string]string, logWriter *bufio.Writer, execRecord *ExecutionRecord) error {
+	// Parse plugin reference
+	pluginName, version, err := workflow.ParsePluginReference(step.Uses)
+	if err != nil {
+		return fmt.Errorf("invalid plugin reference: %w", err)
+	}
+
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Loading plugin: %s (version: %s)", pluginName, version))
+
+	// Get plugin version from database
+	var pluginVersion *database.PluginVersion
+	var loadErr error
+	if version != "" {
+		pluginVersion, loadErr = e.pluginRepo.GetPluginVersionByNumber(pluginName, version)
+	} else {
+		// Get current version if no version specified
+		plugin, pluginErr := e.pluginRepo.GetPluginByName(pluginName)
+		if pluginErr != nil {
+			return fmt.Errorf("plugin not found: %w", pluginErr)
+		}
+		pluginVersion, loadErr = e.pluginRepo.GetPluginCurrentVersion(plugin.ID)
+	}
+
+	if loadErr != nil {
+		return fmt.Errorf("failed to load plugin: %w", loadErr)
+	}
+
+	// Parse plugin definition
+	pluginDef, err := workflow.ParsePlugin(pluginVersion.YAMLContent)
+	if err != nil {
+		return fmt.Errorf("failed to parse plugin: %w", err)
+	}
+
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Plugin loaded: %s v%s", pluginDef.Name, pluginDef.Version))
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Description: %s", pluginDef.Description))
+
+	// Validate dependencies
+	if len(pluginDef.Dependencies) > 0 {
+		e.writeLog(logWriter, execRecord, "Checking dependencies...")
+		if err := workflow.ValidatePluginDependencies(pluginDef.Dependencies); err != nil {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("ERROR: Dependency check failed: %v", err))
+			return fmt.Errorf("dependency check failed: %w", err)
+		}
+		e.writeLog(logWriter, execRecord, "All dependencies satisfied")
+	}
+
+	// Prepare inputs
+	inputs, err := workflow.PreparePluginInputs(pluginDef, step.With)
+	if err != nil {
+		return fmt.Errorf("failed to prepare inputs: %w", err)
+	}
+
+	if len(inputs) > 0 {
+		e.writeLog(logWriter, execRecord, "Plugin inputs:")
+		for key, value := range inputs {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  %s: %s", key, value))
+		}
+	}
+
+	// Execute plugin steps
+	for i, pluginStep := range pluginDef.Steps {
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("\n  Plugin Step %d: %s", i+1, pluginStep.Name))
+
+		// Evaluate condition
+		if pluginStep.Condition != "" {
+			shouldExecute := workflow.EvaluateCondition(pluginStep.Condition, inputs, vars)
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  Condition: %s = %v", pluginStep.Condition, shouldExecute))
+			if !shouldExecute {
+				e.writeLog(logWriter, execRecord, "  Skipping step (condition not met)")
+				continue
+			}
+		}
+
+		// Create step record
+		stepModel := &models.TaskStep{
+			TaskID:  taskID,
+			Name:    fmt.Sprintf("%s / %s", step.Name, pluginStep.Name),
+			Command: pluginStep.Run,
+			Status:  models.StepStatusPending,
+		}
+		if err := e.stepRepo.Create(stepModel); err != nil {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  ERROR: Failed to create step record: %v", err))
+			return err
+		}
+
+		// Substitute inputs and variables in command
+		command := workflow.SubstitutePluginInputs(pluginStep.Run, inputs)
+		command = workflow.SubstituteVariables(command, vars)
+
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("  Command: %s", command))
+
+		// Update step status to running
+		now := time.Now()
+		stepModel.Status = models.StepStatusRunning
+		stepModel.StartedAt = &now
+		stepModel.Command = command
+		if err := e.stepRepo.Update(stepModel); err != nil {
+			return fmt.Errorf("failed to update step status: %w", err)
+		}
+
+		// Create context with step timeout (use plugin timeout if specified)
+		timeout := e.stepTimeout
+		if pluginStep.Timeout > 0 {
+			timeout = time.Duration(pluginStep.Timeout) * time.Second
+		}
+		stepCtx, cancel := context.WithTimeout(ctx, timeout)
+
+		// Create command
+		cmd := exec.CommandContext(stepCtx, "sh", "-c", command)
+
+		// Merge environment variables
+		mergedEnv := workflow.MergeEnvironment(
+			make(map[string]string), // base env (we use os.Environ() instead)
+			globalEnv,
+			pluginDef.Env,
+			pluginStep.Env,
+		)
+
+		cmd.Env = os.Environ()
+		for key, value := range mergedEnv {
+			substValue := workflow.SubstituteVariables(value, vars)
+			substValue = workflow.SubstitutePluginInputs(substValue, inputs)
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, substValue))
+		}
+
+		// Capture output
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		e.writeLog(logWriter, execRecord, "  Executing command...")
+
+		// Execute command
+		startTime := time.Now()
+		err := cmd.Run()
+		endTime := time.Now()
+		cancel() // Clean up context
+
+		exitCode := 0
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+
+		// Write output to log
+		if stdout.Len() > 0 {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  STDOUT:\n%s", stdout.String()))
+		}
+		if stderr.Len() > 0 {
+			e.writeLog(logWriter, execRecord, fmt.Sprintf("  STDERR:\n%s", stderr.String()))
+		}
+
+		duration := endTime.Sub(startTime)
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("  Exit code: %d", exitCode))
+		e.writeLog(logWriter, execRecord, fmt.Sprintf("  Duration: %v", duration))
+
+		// Update step
+		completedAt := time.Now()
+		stepModel.CompletedAt = &completedAt
+		stepModel.ExitCode = &exitCode
+		stepModel.Stdout = stdout.String()
+		stepModel.Stderr = stderr.String()
+
+		// Handle exit codes
+		stopWorkflow := false
+		forceTaskSuccess := false
+		forceTaskFailure := false
+
+		switch exitCode {
+		case 0:
+			stepModel.Status = models.StepStatusCompleted
+		case 100:
+			stepModel.Status = models.StepStatusCompleted
+			stopWorkflow = true
+			forceTaskSuccess = true
+			e.writeLog(logWriter, execRecord, "  INFO: Workflow stopped with success (exit code 100)")
+		case 101:
+			stepModel.Status = models.StepStatusFailed
+			stopWorkflow = true
+			forceTaskFailure = true
+			e.writeLog(logWriter, execRecord, "  INFO: Workflow stopped with failure (exit code 101)")
+		default:
+			stepModel.Status = models.StepStatusFailed
+		}
+
+		if err := e.stepRepo.Update(stepModel); err != nil {
+			return fmt.Errorf("failed to update step: %w", err)
+		}
+
+		// Return special error types for workflow control
+		if stopWorkflow {
+			if forceTaskSuccess {
+				return &WorkflowStopSuccess{Message: "Workflow stopped with success"}
+			}
+			if forceTaskFailure {
+				return &WorkflowStopFailure{Message: "Workflow stopped with failure"}
+			}
+		}
+
+		if exitCode != 0 && exitCode != 100 {
+			return fmt.Errorf("plugin step '%s' exited with code %d", pluginStep.Name, exitCode)
+		}
+
+		// Check if context was cancelled
+		if ctx.Err() != nil {
+			return fmt.Errorf("task cancelled or timed out")
+		}
+	}
+
+	e.writeLog(logWriter, execRecord, fmt.Sprintf("Plugin '%s' completed successfully", pluginDef.Name))
+	return nil
 }

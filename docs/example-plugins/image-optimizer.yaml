@@ -1,0 +1,63 @@
+name: image-optimizer
+description: Optimize images using various compression tools
+version: 1.0.0
+dependencies:
+  - convert  # ImageMagick
+  - jpegoptim
+  - optipng
+inputs:
+  quality:
+    type: number
+    default: 85
+    required: false
+    description: "JPEG quality (1-100)"
+  strip_metadata:
+    type: boolean
+    default: true
+    required: false
+    description: "Strip EXIF metadata from images"
+  format:
+    type: string
+    default: "same"
+    required: false
+    description: "Output format (same, jpg, png, webp)"
+steps:
+  - name: Validate input file
+    run: |
+      if [ ! -f "${{ input_path }}" ]; then
+        echo "Error: Input file not found"
+        exit 1
+      fi
+      echo "Processing: ${{ file_name }}"
+    
+  - name: Optimize JPEG
+    condition: ${{ file_ext == '.jpg' || file_ext == '.jpeg' }}
+    run: |
+      jpegoptim --max=${{ inputs.quality }} \
+        ${{ inputs.strip_metadata == 'true' && '--strip-all' || '' }} \
+        -o --stdout "${{ input_path }}" > "${{ output_path }}"
+    
+  - name: Optimize PNG
+    condition: ${{ file_ext == '.png' }}
+    run: |
+      optipng -o5 -quiet -out "${{ output_path }}" "${{ input_path }}"
+    
+  - name: Convert format
+    condition: ${{ inputs.format != 'same' }}
+    run: |
+      convert "${{ output_path }}" -quality ${{ inputs.quality }} "${{ output_path }}.${{ inputs.format }}"
+      mv "${{ output_path }}.${{ inputs.format }}" "${{ output_path }}"
+    
+  - name: Report results
+    run: |
+      original_size=$(stat -f%z "${{ input_path }}" 2>/dev/null || stat -c%s "${{ input_path }}")
+      optimized_size=$(stat -f%z "${{ output_path }}" 2>/dev/null || stat -c%s "${{ output_path }}")
+      reduction=$((original_size - optimized_size))
+      percent=$((reduction * 100 / original_size))
+      echo "Original size: ${original_size} bytes"
+      echo "Optimized size: ${optimized_size} bytes"
+      echo "Reduction: ${reduction} bytes (${percent}%)"
+tags:
+  - image
+  - optimization
+  - compression

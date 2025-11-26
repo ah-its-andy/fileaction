@@ -1,0 +1,97 @@
+name: pdf-generator
+description: Generate PDF documents from various source formats
+version: 1.0.0
+dependencies:
+  - pandoc
+  - wkhtmltopdf
+inputs:
+  source_format:
+    type: string
+    default: "markdown"
+    required: true
+    description: "Source format (markdown, html, docx)"
+  paper_size:
+    type: string
+    default: "A4"
+    required: false
+    description: "PDF paper size (A4, Letter, Legal)"
+  margin:
+    type: string
+    default: "2cm"
+    required: false
+    description: "Page margins (e.g., 2cm, 1in)"
+  toc:
+    type: boolean
+    default: false
+    required: false
+    description: "Include table of contents"
+  metadata_title:
+    type: string
+    default: ""
+    required: false
+    description: "PDF document title"
+  metadata_author:
+    type: string
+    default: ""
+    required: false
+    description: "PDF document author"
+steps:
+  - name: Validate input
+    run: |
+      if [ ! -f "${{ input_path }}" ]; then
+        echo "Error: Input file not found"
+        exit 1
+      fi
+      echo "Generating PDF from: ${{ file_name }}"
+      echo "Source format: ${{ inputs.source_format }}"
+    
+  - name: Convert Markdown to PDF
+    condition: ${{ inputs.source_format == 'markdown' }}
+    run: |
+      pandoc "${{ input_path }}" \
+        -o "${{ output_path }}" \
+        --pdf-engine=wkhtmltopdf \
+        --variable papersize=${{ inputs.paper_size }} \
+        --variable geometry:margin=${{ inputs.margin }} \
+        ${{ inputs.toc == 'true' && '--toc' || '' }} \
+        ${{ inputs.metadata_title != '' && '--metadata title="${{ inputs.metadata_title }}"' || '' }} \
+        ${{ inputs.metadata_author != '' && '--metadata author="${{ inputs.metadata_author }}"' || '' }}
+    timeout: 300
+    
+  - name: Convert HTML to PDF
+    condition: ${{ inputs.source_format == 'html' }}
+    run: |
+      wkhtmltopdf \
+        --page-size ${{ inputs.paper_size }} \
+        --margin-top ${{ inputs.margin }} \
+        --margin-right ${{ inputs.margin }} \
+        --margin-bottom ${{ inputs.margin }} \
+        --margin-left ${{ inputs.margin }} \
+        "${{ input_path }}" "${{ output_path }}"
+    timeout: 300
+    
+  - name: Convert DOCX to PDF
+    condition: ${{ inputs.source_format == 'docx' }}
+    run: |
+      pandoc "${{ input_path }}" \
+        -o "${{ output_path }}" \
+        --pdf-engine=wkhtmltopdf \
+        --variable papersize=${{ inputs.paper_size }} \
+        --variable geometry:margin=${{ inputs.margin }}
+    timeout: 300
+    
+  - name: Verify output
+    run: |
+      if [ ! -f "${{ output_path }}" ]; then
+        echo "Error: PDF generation failed"
+        exit 1
+      fi
+      
+      file_size=$(stat -f%z "${{ output_path }}" 2>/dev/null || stat -c%s "${{ output_path }}")
+      echo "PDF generated successfully"
+      echo "File size: ${file_size} bytes"
+tags:
+  - pdf
+  - document
+  - conversion
+  - markdown

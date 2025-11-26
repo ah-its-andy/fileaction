@@ -33,9 +33,12 @@ type ConvertConfig struct {
 
 // Step represents a workflow step
 type Step struct {
-	Name string            `yaml:"name"`
-	Run  string            `yaml:"run"`
-	Env  map[string]string `yaml:"env"`
+	Name      string            `yaml:"name"`
+	Run       string            `yaml:"run"`
+	Uses      string            `yaml:"uses"`      // Plugin reference (e.g., "plugin_name@v1.0.0")
+	With      map[string]string `yaml:"with"`      // Plugin input parameters
+	Condition string            `yaml:"condition"` // Optional condition for step execution
+	Env       map[string]string `yaml:"env"`
 }
 
 // Options represents workflow execution options

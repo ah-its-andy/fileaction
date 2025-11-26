@@ -17,6 +17,9 @@ import (
 //go:embed default-workflow.yaml
 var defaultWorkflowYAML string
 
+//go:embed default-plugins/jpeg-to-heic-converter.yaml
+var defaultPluginJpegToHeic string
+
 // DB wraps the GORM database connection
 type DB struct {
 	conn   *gorm.DB
@@ -89,6 +92,11 @@ func New(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("failed to initialize default workflows: %w", err)
 	}
 
+	// Initialize default plugins
+	if err := db.initDefaultPlugins(); err != nil {
+		return nil, fmt.Errorf("failed to initialize default plugins: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -114,6 +122,8 @@ func (db *DB) initSchema() error {
 		&FileModel{},
 		&TaskModel{},
 		&TaskStepModel{},
+		&PluginModel{},
+		&PluginVersionModel{},
 	)
 }
 
@@ -150,6 +160,58 @@ func (db *DB) initDefaultWorkflows() error {
 	}
 
 	return db.conn.Create(workflow).Error
+}
+
+// initDefaultPlugins creates default plugins if they don't exist
+func (db *DB) initDefaultPlugins() error {
+	pluginRepo := NewPluginRepo(db)
+
+	// Define default plugins to install
+	defaultPlugins := []struct {
+		yamlContent string
+		name        string
+	}{
+		{
+			yamlContent: defaultPluginJpegToHeic,
+			name:        "jpeg-to-heic-converter",
+		},
+	}
+
+	for _, dp := range defaultPlugins {
+		// Check if plugin already exists
+		var count int64
+		if err := db.conn.Model(&PluginModel{}).Where("name = ?", dp.name).Count(&count).Error; err != nil {
+			return err
+		}
+
+		// If plugin already exists, skip
+		if count > 0 {
+			continue
+		}
+
+		// Parse YAML to get plugin metadata
+		var pluginData struct {
+			Name        string `yaml:"name"`
+			Description string `yaml:"description"`
+		}
+
+		if err := yaml.Unmarshal([]byte(dp.yamlContent), &pluginData); err != nil {
+			return fmt.Errorf("failed to parse default plugin %s: %w", dp.name, err)
+		}
+
+		// Create plugin
+		_, _, err := pluginRepo.CreatePlugin(
+			pluginData.Name,
+			pluginData.Description,
+			dp.yamlContent,
+			"system",
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create default plugin %s: %w", dp.name, err)
+		}
+	}
+
+	return nil
 }
 
 // GORM Models

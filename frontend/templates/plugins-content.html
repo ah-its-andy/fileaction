@@ -1,0 +1,21 @@
+<div class="plugins-container">
+    <div class="plugins-header">
+        <h2 class="plugins-title">Plugin Library</h2>
+        <div class="plugins-actions">
+            <div class="search-box">
+                <input type="text" id="pluginSearchInput" placeholder="Search plugins..." onkeyup="filterPlugins()">
+            </div>
+            <select id="pluginSourceFilter" onchange="filterPlugins()" class="filter-select">
+                <option value="">All Sources</option>
+                <option value="local">Local</option>
+            </select>
+            <button class="btn btn-primary" id="btnNewPlugin" onclick="openPluginModal()">
+                ➕ Add Plugin
+            </button>
+        </div>
+    </div>
+
+    <div class="plugins-grid" id="pluginsList">
+        <!-- Plugins will be rendered here -->
+    </div>
+</div>
