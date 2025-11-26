@@ -932,6 +932,8 @@ function renderExecutorCards(executors) {
                 <div class="executor-task-info">
                     ${isBusy && executor.current_task ? `
                         <div><strong>Status:</strong> Executing task</div>
+                        ${executor.current_workflow ? `<div><strong>Workflow:</strong> ${escapeHtml(executor.current_workflow)}</div>` : ''}
+                        ${executor.current_file ? `<div><strong>File:</strong> ${escapeHtml(executor.current_file)}</div>` : ''}
                         <div class="executor-task-id">${executor.current_task}</div>
                     ` : `
                         <div><strong>Status:</strong> Waiting for tasks</div>

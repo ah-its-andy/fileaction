@@ -114,10 +114,13 @@ func (p *ExecutorPool) GetBusyCount() int {
 func (p *ExecutorPool) GetExecutorStatus() []ExecutorStatus {
 	statuses := make([]ExecutorStatus, len(p.executors))
 	for i, executor := range p.executors {
+		workflowName, fileName := executor.GetCurrentWorkflowAndFile()
 		statuses[i] = ExecutorStatus{
-			ID:          executor.GetID(),
-			Busy:        executor.IsBusy(),
-			CurrentTask: executor.GetCurrentTask(),
+			ID:              executor.GetID(),
+			Busy:            executor.IsBusy(),
+			CurrentTask:     executor.GetCurrentTask(),
+			CurrentWorkflow: workflowName,
+			CurrentFile:     fileName,
 		}
 	}
 	return statuses
@@ -139,7 +142,9 @@ func (p *ExecutorPool) Close() {
 
 // ExecutorStatus represents the status of an executor
 type ExecutorStatus struct {
-	ID          int    `json:"id"`
-	Busy        bool   `json:"busy"`
-	CurrentTask string `json:"current_task,omitempty"`
+	ID              int    `json:"id"`
+	Busy            bool   `json:"busy"`
+	CurrentTask     string `json:"current_task,omitempty"`
+	CurrentWorkflow string `json:"current_workflow,omitempty"`
+	CurrentFile     string `json:"current_file,omitempty"`
 }

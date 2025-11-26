@@ -60,18 +60,21 @@ type StepRecord struct {
 
 // Executor handles task execution with detailed logging
 type Executor struct {
-	id           int
-	taskRepo     *database.TaskRepo
-	stepRepo     *database.TaskStepRepo
-	workflowRepo *database.WorkflowRepo
-	pluginRepo   *database.PluginRepo
-	logDir       string
-	taskTimeout  time.Duration
-	stepTimeout  time.Duration
-	busy         bool
-	currentTask  string
-	wsHub        WebSocketHub
-	wsHubMu      sync.RWMutex
+	id              int
+	taskRepo        *database.TaskRepo
+	stepRepo        *database.TaskStepRepo
+	workflowRepo    *database.WorkflowRepo
+	pluginRepo      *database.PluginRepo
+	logDir          string
+	taskTimeout     time.Duration
+	stepTimeout     time.Duration
+	busy            bool
+	currentTask     string
+	currentWorkflow string
+	currentFile     string
+	stateMu         sync.RWMutex
+	wsHub           WebSocketHub
+	wsHubMu         sync.RWMutex
 }
 
 // newExecutor creates a new executor instance
@@ -91,6 +94,8 @@ func newExecutor(id int, db *database.DB, logDir string, taskTimeout, stepTimeou
 
 // IsBusy returns whether the executor is currently busy
 func (e *Executor) IsBusy() bool {
+	e.stateMu.RLock()
+	defer e.stateMu.RUnlock()
 	return e.busy
 }
 
@@ -101,7 +106,16 @@ func (e *Executor) GetID() int {
 
 // GetCurrentTask returns the ID of the current task being executed
 func (e *Executor) GetCurrentTask() string {
+	e.stateMu.RLock()
+	defer e.stateMu.RUnlock()
 	return e.currentTask
+}
+
+// GetCurrentWorkflowAndFile returns the current workflow name and file being processed
+func (e *Executor) GetCurrentWorkflowAndFile() (string, string) {
+	e.stateMu.RLock()
+	defer e.stateMu.RUnlock()
+	return e.currentWorkflow, e.currentFile
 }
 
 // SetWebSocketHub sets the WebSocket hub for real-time log broadcasting
@@ -131,11 +145,17 @@ func (e *Executor) broadcastTaskComplete(taskID string) {
 
 // ExecuteTask executes a single task with detailed logging
 func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
+	e.stateMu.Lock()
 	e.busy = true
 	e.currentTask = taskID
+	e.stateMu.Unlock()
 	defer func() {
+		e.stateMu.Lock()
 		e.busy = false
 		e.currentTask = ""
+		e.currentWorkflow = ""
+		e.currentFile = ""
+		e.stateMu.Unlock()
 	}()
 
 	// Get task
@@ -155,6 +175,12 @@ func (e *Executor) ExecuteTask(ctx context.Context, taskID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get workflow: %w", err)
 	}
+
+	// Set current workflow and file for monitoring
+	e.stateMu.Lock()
+	e.currentWorkflow = wf.Name
+	e.currentFile = filepath.Base(task.InputPath)
+	e.stateMu.Unlock()
 
 	// Parse workflow
 	workflowDef, err := workflow.Parse(wf.YAMLContent)
