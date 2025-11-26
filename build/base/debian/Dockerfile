@@ -1,7 +1,7 @@
 # Multi-stage build for FileAction - Debian Base Image
 # Supports both amd64 and arm64 architectures
 
-FROM --platform=$BUILDPLATFORM golang:1.21-bullseye AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-bullseye AS builder
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM

@@ -1,0 +1,42 @@
+# Development/Debug Dockerfile for FileAction - Alpine
+# This image is designed for local development with hot-reload support
+# Source code should be mounted as a volume
+
+FROM golang:1.24-alpine
+
+LABEL maintainer="fileaction"
+LABEL description="FileAction - Development Alpine Image (supports source code mounting)"
+
+# Install development tools and runtime dependencies
+RUN apk add --no-cache \
+    git \
+    make \
+    curl \
+    bash \
+    # Development tools
+    gcc \
+    musl-dev
+
+# Create application directories
+RUN mkdir -p /app/config /app/data /app/logs
+
+WORKDIR /app
+
+# Install air for hot-reload (optional)
+RUN go install github.com/cosmtrek/air@latest
+
+# Copy go.mod and go.sum first for better caching
+# These will be overridden if source is mounted
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Note: config and source code should be mounted as volumes
+
+# Expose port
+EXPOSE 3000
+
+# Default command: run the application with go run
+# This allows for quick iteration without rebuilding
+CMD ["go", "run", "main.go"]
