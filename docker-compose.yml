@@ -1,0 +1,29 @@
+services:
+  # Development version with Debian
+  fileaction-dev-debian:
+    build:
+      context: .
+      dockerfile: build/dev/Dockerfile.debian
+    container_name: fileaction-dev-debian
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for live development
+      - .:/app
+      # Mount config
+      - ./config:/app/config
+      # Mount data directory
+      - ./data:/app/data
+      # Cache Go modules to speed up rebuilds
+      - go-mod-cache:/go/pkg/mod
+    environment:
+      - GO111MODULE=on
+      - CGO_ENABLED=0
+      - TZ=Asia/Shanghai
+    working_dir: /app
+    command: go run main.go
+    restart: unless-stopped
+
+volumes:
+  go-mod-cache:
+    driver: local

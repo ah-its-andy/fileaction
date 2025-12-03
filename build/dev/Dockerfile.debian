@@ -22,9 +22,6 @@ RUN mkdir -p /app/config /app/data /app/logs
 
 WORKDIR /app
 
-# Install air for hot-reload (optional)
-RUN go install github.com/cosmtrek/air@latest
-
 # Copy go.mod and go.sum first for better caching
 # These will be overridden if source is mounted
 COPY go.mod go.sum ./
